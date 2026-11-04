@@ -32,12 +32,11 @@ function seed(db) {
     mk('nk', 'nathan.kurzemnieks@premiersg.com.au', 'Nathan Kurzemnieks');
     mk('fin', 'finance@premiersg.com.au', 'Finance (VIC)');
     mk('dir', 'director@premiersg.com.au', 'Group Director', 1);
-    mk('ty', 'tyson@premiersg.com.au', 'Tyson (WA)');
 
     const mem = ins('INSERT INTO branch_members (user_id, branch_id, role) VALUES (?,?,?)');
     mem.run(U.jb, B.VIC, 'branch_manager'); mem.run(U.jb, B.WA, 'branch_manager');
     mem.run(U.wk, B.VIC, 'pm'); mem.run(U.nb, B.VIC, 'pm'); mem.run(U.mm, B.VIC, 'pm'); mem.run(U.lg, B.VIC, 'pm');
-    mem.run(U.nk, B.VIC, 'supervisor'); mem.run(U.fin, B.VIC, 'finance'); mem.run(U.ty, B.WA, 'branch_manager');
+    mem.run(U.nk, B.VIC, 'supervisor'); mem.run(U.fin, B.VIC, 'finance');
 
     const proj = ins(`INSERT INTO projects (branch_id, number, name, client, head_contractor, lead_pm_id, contract_value, retention_pct, retention_cap_pct, claim_day, start_date, pc_date, tender_margin_pct, status)
                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
@@ -153,6 +152,8 @@ function seed(db) {
     Object.entries(S5).forEach(([code, id], idx) => { line.run(c5, 'base', id, `${code} ${db.prepare('SELECT description d FROM sov_items WHERE id=?').get(id).d}`, db.prepare('SELECT amount a FROM sov_items WHERE id=?').get(id).a, 0, cum5[code], idx); t5 += cum5[code]; });
     db.prepare('UPDATE claims SET certified_amt = ? WHERE id = ?').run(Math.round(t5 * 0.95 * 100) / 100, c5);
 
+    // ---------- every other state, plus extra VIC jobs ----------
+    require('./seed-branches').seedBranches(db, B, { bm: U.jb, pms: [U.wk, U.nb, U.mm, U.lg], sups: [U.nk], fin: U.fin });
     db.prepare("INSERT INTO audit_log (user_id, branch_id, action, detail) VALUES (NULL, ?, 'seed', 'Sample data loaded')").run(B.VIC);
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }

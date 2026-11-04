@@ -120,6 +120,7 @@ module.exports = (r) => {
       const users = ctx.db.prepare('SELECT COUNT(*) n FROM branch_members WHERE branch_id = ?').get(b.id).n;
       return { ...b, branch_managers: bm, active_jobs: projects.length, users, totals: { ...t, forecast_margin_pct: t.contract ? (t.contract - t.forecast) / t.contract : null }, programme_health: prog || 0, unapproved_claims: unapproved };
     });
+    out.sort((a, b) => b.totals.contract - a.totals.contract);
     const g = out.reduce((g, b) => { g.contract += b.totals.contract; g.claimed += b.totals.claimed; g.forecast += b.totals.forecast; g.open_vo += b.totals.open_vo; g.open_vo_n += b.totals.open_vo_n; g.jobs += b.active_jobs; g.unapproved += b.unapproved_claims; return g; },
       { contract: 0, claimed: 0, forecast: 0, open_vo: 0, open_vo_n: 0, jobs: 0, unapproved: 0 });
     g.forecast_margin_pct = g.contract ? (g.contract - g.forecast) / g.contract : null;

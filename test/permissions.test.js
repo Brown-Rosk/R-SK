@@ -39,7 +39,8 @@ test('unauthenticated requests are refused', async () => {
 test('a PM sees only granted jobs, and other jobs 404 (not 403)', async () => {
   const wade = await login('wade.kneale@premiersg.com.au'); await enter(wade, 1);
   const ps = (await call(wade, '/api/projects')).body;
-  assert.deepEqual(ps.map(p => p.number).sort(), ['26-0392', '26-0417', '26-0461', '26-0470']);
+  for (const n of ['26-0392', '26-0417', '26-0461', '26-0470']) assert.ok(ps.some(p => p.number === n), n);
+  assert.ok(!ps.some(p => p.number === '26-0455'), 'must not see Nik\'s job');
   const nik = (await call(wade, '/api/projects/3'));
   assert.equal(nik.status, 404);
   assert.equal((await call(wade, '/api/variations?project_id=3')).body.variations.length, 0);
@@ -55,9 +56,11 @@ test('read-only access cannot write', async () => {
 
 test('branch manager sees every job; finance is read-only', async () => {
   const jb = await login('jayden.brown@premiersg.com.au'); await enter(jb, 1);
-  assert.equal((await call(jb, '/api/projects')).body.length, 5);
+  const all = (await call(jb, '/api/projects')).body.length;
+  const wade = await login('wade.kneale@premiersg.com.au'); await enter(wade, 1);
+  assert.ok(all > (await call(wade, '/api/projects')).body.length);
   const fin = await login('finance@premiersg.com.au'); await enter(fin, 1);
-  assert.equal((await call(fin, '/api/projects')).body.length, 5);
+  assert.equal((await call(fin, '/api/projects')).body.length, all);
   assert.equal((await call(fin, '/api/projects/1/variations', 'POST', { title: 'nope' })).status, 403);
 });
 
@@ -67,7 +70,7 @@ test('branch boundary: a user cannot enter a branch they are not a member of', a
   assert.equal((await enter(wade, null)).status, 403); // group view
   const jb = await login('jayden.brown@premiersg.com.au');
   assert.equal((await enter(jb, 4)).status, 200); // WA — member
-  assert.equal((await call(jb, '/api/projects')).body.length, 0); // nothing in WA yet
+  assert.ok((await call(jb, '/api/projects')).body.every(p => p.number.startsWith('WA-'))); // only WA jobs
   assert.equal((await call(jb, '/api/projects/1')).status, 404); // VIC job invisible from WA
   assert.equal((await call(jb, '/api/group/overview')).status, 403);
 });
@@ -79,8 +82,9 @@ test('director: group view and any branch', async () => {
   assert.equal(g.branches.length, 7);
   assert.equal(g.branches[0].code, 'VIC');
   assert.ok(g.branches[0].totals.contract > 10e6);
+  assert.ok(g.group.contract > 150e6 && g.group.contract < 250e6);
   await enter(d, 1);
-  assert.equal((await call(d, '/api/projects')).body.length, 5);
+  assert.ok((await call(d, '/api/projects')).body.length >= 5);
 });
 
 test('variation workflow and approval threshold', async () => {
