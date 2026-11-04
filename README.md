@@ -1,8 +1,10 @@
 # RōSK — Project Controls
 
-Project controls for Premier Services Group's fire / mechanical / electrical contracting work: projects, budget vs cost, variations register, progress claims — with **branch-level partitioning** and **per-PM job permissions** enforced on the server.
+Project controls for contractors (fire, mechanical, electrical, hydraulic): projects, budget vs cost, variations register, progress claims — multi-tenant, with **company → branch → job** partitioning and **per-PM job permissions** enforced on the server.
 
-**Status:** working first build for testing the limits. All seeded project data is sample data, not real PSG figures.
+**Status:** working build for demonstration. Premier Services Group is seeded as the first customer (its VIC team is real; every other person, client and project is invented sample data). A second small customer, Harbourline Hydraulics, shows the product at single-branch scale.
+
+**Demo sign-ins** (password `psg2026`): `admin@rosk.app` (RōSK platform, sees all companies) · `director@premiersg.com.au` (PSG company view) · `jayden.brown@premiersg.com.au` (PSG VIC Branch Manager, also WA) · `wade.kneale@premiersg.com.au` (PM) · `marcus.delaney@harbourlinehydraulics.com.au` (owner of the small customer).
 
 ## Run it
 
@@ -29,7 +31,8 @@ PSG_DB=/path/to/psg.sqlite node server.js   # different database file (default: 
 
 ## How permissions work
 
-1. **Branch is the hard boundary.** Every project belongs to one branch. A session has one current branch; every query is filtered by it. Users can be members of several branches with a different role in each (e.g. VIC Branch Manager and WA rollout lead).
+0. **Company is the outer boundary.** Every branch, user, project and audit entry belongs to one company. A user's session can only ever see their own company; a RōSK platform admin can enter a company to act as a director there (logged).
+1. **Branch is the hard boundary within a company.** Every project belongs to one branch. A session has one current branch; every query is filtered by it. Users can be members of several branches with a different role in each (e.g. VIC Branch Manager and WA rollout lead).
 2. **Within a branch**, `branch_manager` and `finance` see every job. `pm`, `supervisor` and `estimator` see only jobs listed against them in `project_access` (levels: `lead`, `member`, `readonly`). A job the user cannot see returns **404**, not 403, so its existence isn't confirmed.
 3. **Who can do what** is role-based on top of job access: supervisors can't submit VOs or draft claims; VOs over the branch threshold ($25k default) need a Branch Manager to submit; claims need Branch Manager approval before serving; finance records certification. See the matrix on the Users & permissions screen.
 4. **Directors** (`is_group_admin`) see the group roll-up and can enter any branch.

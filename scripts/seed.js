@@ -10,7 +10,16 @@ function seed(db) {
   db.exec('BEGIN');
   try {
     const ins = (sql) => db.prepare(sql);
-    const branch = ins('INSERT INTO branches (code, name, country, currency, gst_rate, offices, job_prefix, status) VALUES (?,?,?,?,?,?,?,?)');
+    // ---------- companies (RōSK tenants) ----------
+    const company = ins('INSERT INTO companies (name, short_name, trades, plan, country, accounting) VALUES (?,?,?,?,?,?)');
+    const C_PSG = Number(company.run('Premier Services Group', 'PSG', 'Fire · HVAC · Electrical', 'enterprise', 'AU', 'Sage').lastInsertRowid);
+    const C_HH = Number(company.run('Harbourline Hydraulics', 'Harbourline', 'Hydraulic · Fire', 'standard', 'AU', 'Xero').lastInsertRowid);
+    // RōSK platform administrator (not a member of any customer company)
+    user_platform: {
+      const info = db.prepare('INSERT INTO users (company_id, email, name, initials, password_hash, is_platform_admin) VALUES (NULL,?,?,?,?,1)').run('admin@rosk.app', 'RōSK Admin', 'RA', A.hashPassword(PW));
+      void info;
+    }
+    const branch = ins('INSERT INTO branches (company_id, code, name, country, currency, gst_rate, offices, job_prefix, status) VALUES (?,?,?,?,?,?,?,?,?)');
     const B = {};
     [['VIC', 'Victoria', 'AU', 'AUD', 0.10, 'Keysborough · Melbourne CBD · Geelong', 'VIC', 'live'],
      ['NSW', 'New South Wales', 'AU', 'AUD', 0.10, 'Sydney', 'NSW', 'onboarding'],
@@ -19,11 +28,11 @@ function seed(db) {
      ['SA', 'South Australia', 'AU', 'AUD', 0.10, 'Adelaide', 'SA', 'onboarding'],
      ['TAS', 'Tasmania', 'AU', 'AUD', 0.10, 'Hobart', 'TAS', 'onboarding'],
      ['NZ', 'New Zealand', 'NZ', 'NZD', 0.15, 'Auckland · Wellington · Dunedin', 'NZ', 'onboarding']]
-      .forEach(b => { B[b[0]] = Number(branch.run(...b).lastInsertRowid); });
+      .forEach(b => { B[b[0]] = Number(branch.run(C_PSG, ...b).lastInsertRowid); });
 
-    const user = ins('INSERT INTO users (email, name, initials, password_hash, is_group_admin) VALUES (?,?,?,?,?)');
+    const user = ins('INSERT INTO users (company_id, email, name, initials, password_hash, is_group_admin) VALUES (?,?,?,?,?,?)');
     const U = {};
-    const mk = (key, email, name, admin = 0) => { U[key] = Number(user.run(email, name, name.replace(/[^A-Za-z ]/g, '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(), A.hashPassword(PW), admin).lastInsertRowid); };
+    const mk = (key, email, name, admin = 0) => { U[key] = Number(user.run(C_PSG, email, name, name.replace(/[^A-Za-z ]/g, '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(), A.hashPassword(PW), admin).lastInsertRowid); };
     mk('jb', 'jayden.brown@premiersg.com.au', 'Jayden Brown');
     mk('wk', 'wade.kneale@premiersg.com.au', 'Wade Kneale');
     mk('nb', 'nik.borobokas@premiersg.com.au', 'Nik Borobokas');
@@ -153,7 +162,8 @@ function seed(db) {
     db.prepare('UPDATE claims SET certified_amt = ? WHERE id = ?').run(Math.round(t5 * 0.95 * 100) / 100, c5);
 
     // ---------- every other state, plus extra VIC jobs ----------
-    require('./seed-branches').seedBranches(db, B, { bm: U.jb, pms: [U.wk, U.nb, U.mm, U.lg], sups: [U.nk], fin: U.fin });
+    require('./seed-branches').seedBranches(db, B, { bm: U.jb, pms: [U.wk, U.nb, U.mm, U.lg], sups: [U.nk], fin: U.fin }, C_PSG);
+    require('./seed-branches').seedSecondCompany(db, C_HH);
     db.prepare("INSERT INTO audit_log (user_id, branch_id, action, detail) VALUES (NULL, ?, 'seed', 'Sample data loaded')").run(B.VIC);
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }

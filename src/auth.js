@@ -38,15 +38,20 @@ function loadSession(db) {
     ctx.db = db;
     const sid = ctx.cookies.psg_session;
     if (!sid) return;
-    const s = db.prepare(`SELECT s.id sid, s.branch_id, u.* FROM sessions s JOIN users u ON u.id = s.user_id
+    const s = db.prepare(`SELECT s.id sid, s.branch_id, s.company_id session_company, u.* FROM sessions s JOIN users u ON u.id = s.user_id
                           WHERE s.id = ? AND s.expires_at > datetime('now') AND u.active = 1`).get(sid);
     if (!s) return;
-    ctx.user = { id: s.id, email: s.email, name: s.name, initials: s.initials, is_group_admin: !!s.is_group_admin };
+    ctx.user = { id: s.id, email: s.email, name: s.name, initials: s.initials, is_group_admin: !!s.is_group_admin, is_platform_admin: !!s.is_platform_admin, company_id: s.company_id };
     ctx.sid = s.sid;
+    // Company context: a user's own company, or (platform admin only) the company they have entered.
+    const companyId = s.is_platform_admin && s.session_company ? s.session_company : s.company_id;
+    ctx.company = companyId ? db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) : null;
+    if (s.is_platform_admin && s.session_company) ctx.user.is_group_admin = true; // platform admin acts as a director inside a company
     ctx.memberships = db.prepare(`SELECT bm.branch_id, bm.role, b.code, b.name FROM branch_members bm
                                   JOIN branches b ON b.id = bm.branch_id WHERE bm.user_id = ?`).all(s.id);
     if (s.branch_id) {
-      ctx.branch = db.prepare('SELECT * FROM branches WHERE id = ?').get(s.branch_id);
+      ctx.branch = db.prepare('SELECT * FROM branches WHERE id = ? AND company_id = ?').get(s.branch_id, companyId);
+      if (!ctx.branch) return; // branch outside the current company context
       const m = ctx.memberships.find(x => x.branch_id === s.branch_id);
       ctx.role = m ? m.role : (ctx.user.is_group_admin ? 'group_admin' : null);
     } else if (ctx.user.is_group_admin) {
@@ -68,7 +73,8 @@ function requireRole(...roles) {
     if (!roles.includes(ctx.role)) throw new HttpError(403, `Requires role: ${roles.join(' or ')}`);
   };
 }
-function requireGroupAdmin(ctx) { requireUser(ctx); if (!ctx.user.is_group_admin) throw new HttpError(403, 'Directors only'); }
+function requireGroupAdmin(ctx) { requireUser(ctx); if (!ctx.user.is_group_admin) throw new HttpError(403, 'Directors only'); if (!ctx.company) throw new HttpError(403, 'Choose a company first'); }
+function requirePlatformAdmin(ctx) { requireUser(ctx); if (!ctx.user.is_platform_admin) throw new HttpError(403, 'RōSK platform administrators only'); }
 
 function seesWholeBranch(ctx) { return ctx.role === 'group_admin' || SEES_ALL_BRANCH.has(ctx.role); }
 
@@ -101,4 +107,4 @@ function audit(ctx, action, entity, entityId, detail) {
 }
 
 module.exports = { ROLES, hashPassword, verifyPassword, createSession, destroySession, loadSession,
-  requireUser, requireBranch, requireRole, requireGroupAdmin, seesWholeBranch, projectScope, loadProject, requireWrite, audit };
+  requireUser, requireBranch, requireRole, requireGroupAdmin, requirePlatformAdmin, seesWholeBranch, projectScope, loadProject, requireWrite, audit };

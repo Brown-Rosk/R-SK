@@ -31,14 +31,14 @@ const VO_TITLES = {
 };
 const SOURCES = ['Client instruction', 'RFI response', 'Latent condition', 'Design change', 'Delay / disruption'];
 
-function makeUsers(db, branchId, bm, pms, supervisors, finance) {
-  const ins = db.prepare('INSERT OR IGNORE INTO users (email, name, initials, password_hash) VALUES (?,?,?,?)');
+function makeUsers(db, branchId, bm, pms, supervisors, finance, companyId, domain = 'premiersg.com.au') {
+  const ins = db.prepare('INSERT OR IGNORE INTO users (company_id, email, name, initials, password_hash) VALUES (?,?,?,?,?)');
   const get = db.prepare('SELECT id FROM users WHERE email = ?');
   const mem = db.prepare('INSERT OR REPLACE INTO branch_members (user_id, branch_id, role) VALUES (?,?,?)');
   const mk = (name, role) => {
-    const email = name.toLowerCase().replace(/[^a-z ]/g, '').trim().replace(/\s+/g, '.') + '@premiersg.com.au';
+    const email = name.toLowerCase().replace(/[^a-z ]/g, '').trim().replace(/\s+/g, '.') + '@' + domain;
     const initials = name.replace(/[^A-Za-z ]/g, '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
-    ins.run(email, name, initials, A.hashPassword('psg2026'));
+    ins.run(companyId, email, name, initials, A.hashPassword('psg2026'));
     const id = get.get(email).id; mem.run(id, branchId, role); return id;
   };
   return { bm: mk(bm, 'branch_manager'), pms: pms.map(n => mk(n, 'pm')), sups: supervisors.map(n => mk(n, 'supervisor')), fin: finance ? mk(finance, 'finance') : null };
@@ -176,14 +176,29 @@ const VIC_EXTRA = [
   P('T-26-0480', '640 Bourke Street — tower fire services (tender)', 'Far East Consortium', '[TBC]', 'fire', 9.8, 0.145, 0, '2027-02-01', 26, 0, 'tender'),
 ];
 
-function seedBranches(db, B, vicUsers) {
+function seedBranches(db, B, vicUsers, companyId) {
   for (const [code, d] of Object.entries(BRANCH_DATA)) {
     const bid = B[code];
     db.prepare("UPDATE branches SET status = 'live', offices = ? WHERE id = ?").run(d.offices, bid);
-    const users = makeUsers(db, bid, d.bm, d.pms, d.sups, d.fin);
+    const users = makeUsers(db, bid, d.bm, d.pms, d.sups, d.fin, companyId);
     d.projects.forEach(p => makeProject(db, bid, users, p));
   }
   VIC_EXTRA.forEach(p => makeProject(db, B.VIC, vicUsers, p));
 }
 
-module.exports = { seedBranches, BRANCH_DATA, VIC_EXTRA };
+// A second, small customer: one-branch hydraulics & fire contractor, ~15 staff, so the product visibly isn't sized only for a group.
+function seedSecondCompany(db, companyId) {
+  const bid = Number(db.prepare("INSERT INTO branches (company_id, code, name, country, currency, gst_rate, offices, job_prefix, status, vo_approval_threshold) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    .run(companyId, 'SYD', 'Sydney', 'AU', 'AUD', 0.10, 'Botany', 'HH', 'live', 10000).lastInsertRowid);
+  const users = makeUsers(db, bid, 'Marcus Delaney', ['Kate Sutherland', 'Josh Pereira'], ['Dean Castillo'], 'Accounts (Harbourline)', companyId, 'harbourlinehydraulics.com.au');
+  // directors: Marcus is also the owner → group admin
+  db.prepare('UPDATE users SET is_group_admin = 1 WHERE id = ?').run(users.bm);
+  [
+    P('HH-26-0142', 'Mascot industrial estate — hydrants & hose reels', 'Goodman', 'Vaughan Constructions', 'fire', 2.1, 0.17, 0.55, '2026-03-02', 12, 0),
+    P('HH-26-0147', 'Alexandria apartments — Stage 2 sprinklers', 'Meriton', 'Meriton', 'fire', 1.6, 0.16, 0.38, '2026-05-18', 12, 1),
+    P('HH-26-0151', 'Botany cold store — ESFR upgrade', 'Lineage', 'Total Construction', 'fire', 0.9, 0.18, 0.24, '2026-08-03', 8, 0),
+    P('HH-26-0139', 'Randwick school hall — fire services', 'NSW Dept of Education', 'Buildcorp', 'fire', 0.6, 0.19, 0.86, '2026-02-09', 9, 1),
+  ].forEach(p => makeProject(db, bid, users, p));
+}
+
+module.exports = { seedBranches, seedSecondCompany, BRANCH_DATA, VIC_EXTRA };

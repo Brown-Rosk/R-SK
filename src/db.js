@@ -18,17 +18,23 @@ function open(file = DB_PATH) {
 
 function migrate(d) {
   d.exec(`
+  -- A company is a RōSK customer (tenant). Everything below it is isolated from every other company.
+  CREATE TABLE IF NOT EXISTS companies (
+    id INTEGER PRIMARY KEY, name TEXT NOT NULL, short_name TEXT, trades TEXT, plan TEXT NOT NULL DEFAULT 'pilot',
+    country TEXT NOT NULL DEFAULT 'AU', accounting TEXT, status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')));
+
   CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL COLLATE NOCASE, name TEXT NOT NULL,
-    initials TEXT, password_hash TEXT, is_group_admin INTEGER NOT NULL DEFAULT 0,
+    id INTEGER PRIMARY KEY, company_id INTEGER REFERENCES companies(id), email TEXT UNIQUE NOT NULL COLLATE NOCASE, name TEXT NOT NULL,
+    initials TEXT, password_hash TEXT, is_group_admin INTEGER NOT NULL DEFAULT 0, is_platform_admin INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 
   CREATE TABLE IF NOT EXISTS branches (
-    id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL, country TEXT NOT NULL,
+    id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL REFERENCES companies(id), code TEXT NOT NULL, name TEXT NOT NULL, country TEXT NOT NULL,
     currency TEXT NOT NULL DEFAULT 'AUD', gst_rate REAL NOT NULL DEFAULT 0.10, offices TEXT,
     job_prefix TEXT, vo_approval_threshold REAL NOT NULL DEFAULT 25000,
     claim_response_days INTEGER NOT NULL DEFAULT 10, vo_response_days INTEGER NOT NULL DEFAULT 21,
-    status TEXT NOT NULL DEFAULT 'live');
+    status TEXT NOT NULL DEFAULT 'live', UNIQUE (company_id, code));
 
   -- role: supervisor | pm | estimator | branch_manager | finance
   CREATE TABLE IF NOT EXISTS branch_members (
@@ -36,7 +42,7 @@ function migrate(d) {
     role TEXT NOT NULL, PRIMARY KEY (user_id, branch_id));
 
   CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), branch_id INTEGER,
+    id TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), branch_id INTEGER, company_id INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')), expires_at TEXT NOT NULL);
 
   CREATE TABLE IF NOT EXISTS projects (
@@ -105,6 +111,9 @@ function migrate(d) {
     action TEXT NOT NULL, entity TEXT, entity_id INTEGER, detail TEXT);
   CREATE INDEX IF NOT EXISTS audit_branch ON audit_log(branch_id, at);
   `);
+  // Guard against a database created by an older build.
+  const cols = d.prepare("PRAGMA table_info('branches')").all().map(c => c.name);
+  if (!cols.includes('company_id')) throw new Error('This database was created by an older version of RōSK. Delete the data folder (or set PSG_DB to a new path) and start again.');
 }
 
 module.exports = { open, DB_PATH };

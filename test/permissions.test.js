@@ -144,13 +144,34 @@ test('claim maths, checks and approval chain', async () => {
 test('job grants and audit trail', async () => {
   const jb = await login('jayden.brown@premiersg.com.au'); await enter(jb, 1);
   const wade = await login('wade.kneale@premiersg.com.au'); await enter(wade, 1);
+  const wid = (await call(jb, '/api/branch/users')).body.find(u => u.email.startsWith('wade')).id;
   assert.equal((await call(wade, '/api/projects/3')).status, 404);
-  assert.equal((await call(jb, '/api/projects/3/access', 'POST', { user_id: 2, level: 'readonly' })).status, 200);
+  assert.equal((await call(jb, '/api/projects/3/access', 'POST', { user_id: wid, level: 'readonly' })).status, 200);
   assert.equal((await call(wade, '/api/projects/3')).status, 200);
-  assert.equal((await call(jb, '/api/projects/3/access/2', 'DELETE')).status, 200);
+  assert.equal((await call(jb, `/api/projects/3/access/${wid}`, 'DELETE')).status, 200);
   assert.equal((await call(wade, '/api/projects/3')).status, 404);
-  assert.equal((await call(wade, '/api/projects/1/access', 'POST', { user_id: 2, level: 'lead' })).status, 403); // PM cannot grant
+  assert.equal((await call(wade, '/api/projects/1/access', 'POST', { user_id: wid, level: 'lead' })).status, 403); // PM cannot grant
   const log = (await call(jb, '/api/audit')).body;
   assert.ok(log.some(l => l.action === 'access.grant') && log.some(l => l.action === 'access.revoke'));
   assert.equal((await call(wade, '/api/audit')).status, 403);
+});
+
+test('company boundary: tenants are isolated; platform admin can enter any company', async () => {
+  const marcus = await login('marcus.delaney@harbourlinehydraulics.com.au');
+  const me = (await call(marcus, '/api/me')).body;
+  assert.equal(me.company.short_name, 'Harbourline');
+  assert.equal(me.branches.length, 1); // only his own company's branch is listed
+  assert.equal((await enter(marcus, 1)).status, 403); // PSG's VIC branch — refused
+  await enter(marcus, me.branches[0].id);
+  assert.ok((await call(marcus, '/api/projects')).body.every(p => p.number.startsWith('HH-')));
+  assert.equal((await call(marcus, '/api/projects/1')).status, 404);
+  await enter(marcus, null); // owner is a director of his company
+  assert.equal((await call(marcus, '/api/group/overview')).body.branches.length, 1);
+  assert.equal((await call(marcus, '/api/platform/companies')).status, 403);
+  const admin = await login('admin@rosk.app');
+  const cos = (await call(admin, '/api/platform/companies')).body;
+  assert.equal(cos.length, 2); assert.equal(cos[0].short_name, 'PSG');
+  assert.equal((await call(admin, '/api/group/overview')).status, 403); // no company entered yet
+  await call(admin, '/api/auth/company', 'POST', { company_id: cos[1].id });
+  assert.equal((await call(admin, '/api/group/overview')).body.company.short_name, 'Harbourline');
 });

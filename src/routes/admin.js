@@ -22,10 +22,11 @@ module.exports = (r) => {
     const { email, name, role, password } = ctx.body;
     if (!email || !name || !A.ROLES.includes(role)) throw new HttpError(400, `email, name and a role (${A.ROLES.join(', ')}) are required`);
     let u = ctx.db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    if (u && u.company_id !== ctx.company.id) throw new HttpError(409, 'That email belongs to a user of another company');
     const initials = name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
     if (!u) {
       const pw = password || require('node:crypto').randomBytes(6).toString('base64url');
-      const info = ctx.db.prepare('INSERT INTO users (email, name, initials, password_hash) VALUES (?,?,?,?)').run(email, name, initials, A.hashPassword(pw));
+      const info = ctx.db.prepare('INSERT INTO users (company_id, email, name, initials, password_hash) VALUES (?,?,?,?,?)').run(ctx.company.id, email, name, initials, A.hashPassword(pw));
       u = { id: Number(info.lastInsertRowid), temp_password: password ? undefined : pw };
     }
     ctx.db.prepare('INSERT INTO branch_members (user_id, branch_id, role) VALUES (?,?,?) ON CONFLICT(user_id, branch_id) DO UPDATE SET role = excluded.role').run(u.id, ctx.branch.id, role);
@@ -109,7 +110,7 @@ module.exports = (r) => {
 
   // ---- group view (directors) ----
   r.get('/api/group/overview', A.requireGroupAdmin, (ctx) => {
-    const branches = ctx.db.prepare('SELECT * FROM branches ORDER BY id').all();
+    const branches = ctx.db.prepare('SELECT * FROM branches WHERE company_id = ? ORDER BY id').all(ctx.company.id);
     const out = branches.map(b => {
       const bm = ctx.db.prepare(`SELECT u.name FROM branch_members m JOIN users u ON u.id = m.user_id WHERE m.branch_id = ? AND m.role = 'branch_manager' ORDER BY u.name`).all(b.id).map(x => x.name);
       const projects = ctx.db.prepare("SELECT * FROM projects WHERE branch_id = ? AND status = 'live'").all(b.id).map(p => ({ ...p, summary: projectSummary(ctx.db, p) }));
@@ -124,15 +125,15 @@ module.exports = (r) => {
     const g = out.reduce((g, b) => { g.contract += b.totals.contract; g.claimed += b.totals.claimed; g.forecast += b.totals.forecast; g.open_vo += b.totals.open_vo; g.open_vo_n += b.totals.open_vo_n; g.jobs += b.active_jobs; g.unapproved += b.unapproved_claims; return g; },
       { contract: 0, claimed: 0, forecast: 0, open_vo: 0, open_vo_n: 0, jobs: 0, unapproved: 0 });
     g.forecast_margin_pct = g.contract ? (g.contract - g.forecast) / g.contract : null;
-    return { branches: out, group: g, note: 'NZ figures shown in NZD; FX conversion to be added when the NZ branch is onboarded.' };
+    return { company: ctx.company, branches: out, group: g, note: out.some(b => b.currency !== out[0].currency) ? 'Mixed currencies are shown in their own currency; FX roll-up to come.' : '' };
   });
 
-  r.get('/api/group/branches', A.requireGroupAdmin, (ctx) => ctx.db.prepare('SELECT * FROM branches ORDER BY id').all());
+  r.get('/api/group/branches', A.requireGroupAdmin, (ctx) => ctx.db.prepare('SELECT * FROM branches WHERE company_id = ? ORDER BY id').all(ctx.company.id));
   r.post('/api/group/branches', A.requireGroupAdmin, (ctx) => {
     const b = ctx.body;
     if (!b.code || !b.name || !b.country) throw new HttpError(400, 'code, name, country required');
-    const info = ctx.db.prepare('INSERT INTO branches (code, name, country, currency, gst_rate, offices, job_prefix, status) VALUES (?,?,?,?,?,?,?,?)')
-      .run(b.code.toUpperCase(), b.name, b.country, b.currency || 'AUD', b.gst_rate ?? 0.10, b.offices || null, b.job_prefix || null, b.status || 'onboarding');
+    const info = ctx.db.prepare('INSERT INTO branches (company_id, code, name, country, currency, gst_rate, offices, job_prefix, status) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(ctx.company.id, b.code.toUpperCase(), b.name, b.country, b.currency || 'AUD', b.gst_rate ?? 0.10, b.offices || null, b.job_prefix || null, b.status || 'onboarding');
     A.audit(ctx, 'branch.create', 'branch', Number(info.lastInsertRowid), b);
     ctx.status = 201;
     return ctx.db.prepare('SELECT * FROM branches WHERE id = ?').get(Number(info.lastInsertRowid));
@@ -141,12 +142,37 @@ module.exports = (r) => {
   r.post('/api/group/branches/:id/members', A.requireGroupAdmin, (ctx) => {
     const bid = Number(ctx.params.id); const { email, name, role } = ctx.body;
     if (!A.ROLES.includes(role)) throw new HttpError(400, 'Invalid role');
-    let u = ctx.db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (!ctx.db.prepare('SELECT 1 FROM branches WHERE id = ? AND company_id = ?').get(bid, ctx.company.id)) throw new HttpError(404, 'Branch not found');
+    let u = ctx.db.prepare('SELECT id, company_id FROM users WHERE email = ?').get(email);
+    if (u && u.company_id !== ctx.company.id) throw new HttpError(409, 'That email belongs to a user of another company');
     let temp;
     if (!u) { temp = require('node:crypto').randomBytes(6).toString('base64url'); const initials = (name || email).split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
-      u = { id: Number(ctx.db.prepare('INSERT INTO users (email, name, initials, password_hash) VALUES (?,?,?,?)').run(email, name || email, initials, A.hashPassword(temp)).lastInsertRowid) }; }
+      u = { id: Number(ctx.db.prepare('INSERT INTO users (company_id, email, name, initials, password_hash) VALUES (?,?,?,?,?)').run(ctx.company.id, email, name || email, initials, A.hashPassword(temp)).lastInsertRowid) }; }
     ctx.db.prepare('INSERT INTO branch_members (user_id, branch_id, role) VALUES (?,?,?) ON CONFLICT(user_id, branch_id) DO UPDATE SET role = excluded.role').run(u.id, bid, role);
     A.audit(ctx, 'user.add_to_branch', 'user', u.id, { branch_id: bid, role });
     return { id: u.id, temp_password: temp };
+  });
+
+  // ---- RōSK platform (multi-tenant) ----
+  r.get('/api/platform/companies', A.requirePlatformAdmin, (ctx) => {
+    return ctx.db.prepare(`SELECT c.*, (SELECT COUNT(*) FROM branches b WHERE b.company_id = c.id) branches,
+        (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.active = 1) users,
+        (SELECT COUNT(*) FROM projects p JOIN branches b ON b.id = p.branch_id WHERE b.company_id = c.id AND p.status = 'live') live_jobs,
+        (SELECT COALESCE(SUM(p.contract_value),0) FROM projects p JOIN branches b ON b.id = p.branch_id WHERE b.company_id = c.id AND p.status = 'live') live_value,
+        (SELECT MAX(a.at) FROM audit_log a JOIN users u ON u.id = a.user_id WHERE u.company_id = c.id) last_activity
+      FROM companies c ORDER BY live_value DESC`).all();
+  });
+  r.post('/api/platform/companies', A.requirePlatformAdmin, (ctx) => {
+    const b = ctx.body;
+    if (!b.name) throw new HttpError(400, 'name required');
+    const info = ctx.db.prepare('INSERT INTO companies (name, short_name, trades, plan, country, accounting) VALUES (?,?,?,?,?,?)')
+      .run(b.name, b.short_name || null, b.trades || null, b.plan || 'pilot', b.country || 'AU', b.accounting || null);
+    const cid = Number(info.lastInsertRowid);
+    if (b.first_branch_code) ctx.db.prepare('INSERT INTO branches (company_id, code, name, country, currency, gst_rate, status) VALUES (?,?,?,?,?,?,?)')
+      .run(cid, b.first_branch_code.toUpperCase(), b.first_branch_name || b.first_branch_code, b.country || 'AU', b.country === 'NZ' ? 'NZD' : 'AUD', b.country === 'NZ' ? 0.15 : 0.10, 'live');
+    if (b.admin_email) { const temp = require('node:crypto').randomBytes(6).toString('base64url');
+      ctx.db.prepare('INSERT INTO users (company_id, email, name, initials, password_hash, is_group_admin) VALUES (?,?,?,?,?,1)').run(cid, b.admin_email, b.admin_name || b.admin_email, (b.admin_name || b.admin_email).slice(0, 2).toUpperCase(), A.hashPassword(temp));
+      ctx.status = 201; return { id: cid, admin_temp_password: temp }; }
+    ctx.status = 201; return { id: cid };
   });
 };

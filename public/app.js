@@ -57,23 +57,26 @@ const I = {
 
 // ---------- shell ----------
 function shell(active, content) {
-  const b = ME.current_branch; const group = !b;
-  const nav = group ? [
-    ['#/group', I.globe, 'Group overview'], ['#/audit', I.log, 'Audit log'],
+  const b = ME.current_branch; const group = !b; const platformOnly = ME.user.is_platform_admin && !ME.company;
+  const nav = platformOnly ? [['#/platform', I.globe, 'All companies']] : group ? [
+    ['#/group', I.globe, 'Company overview'], ['#/audit', I.log, 'Audit log'],
+    ...(ME.user.is_platform_admin ? [['sep'], ['#/platform', I.globe, 'RōSK · all companies']] : []),
   ] : [
     ['#/dashboard', I.dash, 'Dashboard'], ['#/projects', I.proj, 'Projects'], ['#/variations', I.vo, 'Variations'], ['#/claims', I.claim, 'Progress claims'],
     ...(isBM() ? [['sep'], ['#/users', I.users, 'Users & permissions'], ['#/settings', I.cog, 'Branch settings'], ['#/audit', I.log, 'Audit log']] : []),
-    ...(isDirector() ? [['#/group', I.globe, 'Group overview']] : []),
+    ...(isDirector() ? [['#/group', I.globe, 'Company overview']] : []),
+    ...(ME.user.is_platform_admin ? [['sep'], ['#/platform', I.globe, 'RōSK · all companies']] : []),
   ];
   app.innerHTML = `<div class="app">
     <nav class="side" aria-label="Main">
-      <div class="brand"><div class="logo" aria-hidden="true">R</div><div><b>RōSK</b><small>Project controls</small></div></div>
-      <button class="switch" id="switchBranch" aria-label="Switch branch"><span class="tag ${group ? 'or' : ''}">${group ? 'ALL' : esc(b.code)}</span><span style="flex:1">${group ? 'Group view' : esc(b.name)}<small>${ME.role ? esc(ROLE[ME.role] || ME.role) : ''} · Switch branch ▾</small></span></button>
+      <div class="brand"><div class="logo" aria-hidden="true">R</div><div><b>RōSK</b><small>${esc(ME.company?.name || 'Platform')}</small></div></div>
+      ${platformOnly ? '' : `<button class="switch" id="switchBranch" aria-label="Switch branch"><span class="tag ${group ? 'or' : ''}">${group ? 'ALL' : esc(b.code)}</span><span style="flex:1">${group ? 'Company view' : esc(b.name)}<small>${ME.role ? esc(ROLE[ME.role] || ME.role) : ''} · Switch branch ▾</small></span></button>`}
       ${nav.map(n => n[0] === 'sep' ? '<div class="sep"></div>' : `<a class="nav ${active === n[0] ? 'on' : ''}" href="${n[0]}">${n[1]}${n[2]}</a>`).join('')}
-      <div class="who">Signed in as<br><b>${esc(ME.user.name)}</b><br><button id="logout">Sign out</button></div>
+      <div class="who">Signed in as<br><b>${esc(ME.user.name)}</b><br>${ME.user.is_platform_admin && ME.company ? `<button id="leaveCo">Leave ${esc(ME.company.short_name || 'company')}</button> · ` : ''}<button id="logout">Sign out</button></div>
     </nav>
     <main>${content}</main></div>`;
-  $('#switchBranch').onclick = () => { location.hash = '#/branch'; };
+  $('#switchBranch')?.addEventListener('click', () => { location.hash = '#/branch'; });
+  $('#leaveCo')?.addEventListener('click', async () => { await api('/api/auth/company', { method: 'POST', body: { company_id: null } }); ME = await api('/api/me'); location.hash = '#/platform'; });
   $('#logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }); ME = null; location.hash = '#/login'; };
 }
 const header = (eyebrow, title, sub, actions = '') => `<header class="ph"><div class="t"><div class="eyebrow">${eyebrow}</div><h1>${title}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div class="actions">${actions}</div></header>`;
@@ -84,30 +87,31 @@ async function viewLogin(err) {
   app.innerHTML = `<div class="login"><aside class="hero">
     <div class="brand" style="padding:0"><div class="logo" style="width:40px;height:40px;font-size:18px" aria-hidden="true">R</div><div><b style="font-size:20px;letter-spacing:.02em">RōSK</b><small>Project controls for contractors</small></div></div>
     <div style="max-width:420px;display:flex;flex-direction:column;gap:16px"><h1>One sign-in. Your branch. Your jobs.</h1>
-      <p>Sign in, pick the branch you work in, and the system shows only the projects you've been granted there. Branch Managers see the whole branch; directors can switch between states or view the group.</p>
-      <ul><li>Data is partitioned by branch — a VIC PM can't query a QLD job even by URL</li><li>Branches you're not a member of are greyed out</li><li>Every sign-in, branch switch and change is logged</li></ul></div>
-    <div class="small" style="color:#8F9198">RōSK · Premier Services Group · Fire · HVAC · Electrical · AU &amp; NZ</div></aside>
+      <p>Project controls for contractors: variations, progress claims, budget vs cost and who's allowed to see what — built for how fire, mechanical, electrical and hydraulic businesses actually run jobs.</p>
+      <ul><li>Each company's data is fully isolated; within it, each branch is its own boundary</li><li>PMs and supervisors see only the jobs they've been granted</li><li>Every sign-in, branch switch and change is logged</li></ul></div>
+    <div class="small" style="color:#8F9198">RōSK · Project controls for contractors · AU &amp; NZ</div></aside>
     <section class="panel"><form class="lbox" id="loginForm"><div><h2 style="font-size:18px">Sign in</h2><div class="sub">Microsoft 365 single sign-on will replace this in the pilot.</div></div>
       <label class="f">Work email<input class="in" name="email" type="email" autocomplete="username" required value="jayden.brown@premiersg.com.au"></label>
       <label class="f">Password<input class="in" name="password" type="password" autocomplete="current-password" required value="psg2026"></label>
       ${err ? `<div class="err">${esc(err)}</div>` : ''}
       <button class="btn p" type="submit">Sign in</button>
-      <div class="small muted">Sample users (password <code>psg2026</code>): jayden.brown@ (Branch Manager) · wade.kneale@ (PM) · nathan.kurzemnieks@ (Supervisor) · finance@ · director@ (Group)</div></form></section></div>`;
-  $('#loginForm').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/auth/login', { method: 'POST', body: formVals(e.target) }); ME = await api('/api/me'); location.hash = '#/branch'; } catch (er) { viewLogin(er.message); } };
+      <div class="small muted">Demo sign-ins (password <code>psg2026</code>): <b>admin@rosk.app</b> (RōSK platform) · director@premiersg.com.au (PSG directors) · jayden.brown@premiersg.com.au (PSG VIC Branch Manager) · wade.kneale@premiersg.com.au (PM) · marcus.delaney@harbourlinehydraulics.com.au (small customer)</div></form></section></div>`;
+  $('#loginForm').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/auth/login', { method: 'POST', body: formVals(e.target) }); ME = await api('/api/me'); location.hash = ME.user.is_platform_admin && !ME.company ? '#/platform' : '#/branch'; } catch (er) { viewLogin(er.message); } };
 }
 
 async function viewBranch() {
   ME = await api('/api/me');
+  if (ME.user.is_platform_admin && !ME.company) return viewPlatform();
   const mine = ME.branches.filter(b => b.role);
   if (mine.length === 1 && !isDirector() && !ME.current_branch) { await api('/api/auth/branch', { method: 'POST', body: { branch_id: mine[0].id } }); ME = await api('/api/me'); location.hash = '#/dashboard'; return; }
   let sel = ME.current_branch?.id ?? (mine[0]?.id ?? null);
   const render = () => {
     app.innerHTML = `<div class="login"><aside class="hero"><div class="brand" style="padding:0"><div class="logo" style="width:40px;height:40px;font-size:18px" aria-hidden="true">R</div><div><b style="font-size:20px;letter-spacing:.02em">RōSK</b><small>Project controls for contractors</small></div></div>
-      <div style="max-width:420px;display:flex;flex-direction:column;gap:16px"><h1>Choose your branch</h1><p>You can switch branch any time from the top-left menu without signing out. Your role can differ per branch.</p></div><div></div></aside>
+      <div style="max-width:420px;display:flex;flex-direction:column;gap:16px"><div class="eyebrow" style="color:#8F9198">${esc(ME.company?.name || '')}</div><h1>Choose your branch</h1><p>You can switch branch any time from the top-left menu without signing out. Your role can differ per branch.</p></div><div></div></aside>
       <section class="panel"><div class="lbox">
         <div style="display:flex;align-items:center;gap:10px"><span class="av">${esc(ME.user.initials)}</span><div><b>${esc(ME.user.name)}</b><div class="small muted">${esc(ME.user.email)}</div></div><button class="btn s" id="lo" style="margin-left:auto">Not you?</button></div>
         <div class="branches">${ME.branches.map(b => `<button class="br ${b.role ? '' : 'dis'} ${sel === b.id ? 'on' : ''}" data-id="${b.id}" ${b.role ? '' : 'disabled'} aria-pressed="${sel === b.id}"><span class="tg">${esc(b.code)}</span><span><b>${esc(b.name)}</b><small>${b.role ? esc(b.offices || '') + ' · ' + esc(ROLE[b.role] || b.role) : 'No access — ask that Branch Manager'}</small></span></button>`).join('')}
-          ${isDirector() ? `<button class="br ${sel === null ? 'on' : ''}" data-id="group" aria-pressed="${sel === null}"><span class="tg" style="background:var(--orange)">ALL</span><span><b>Group view</b><small>Directors, CEO &amp; CFO · read-only roll-up</small></span></button>` : ''}</div>
+          ${isDirector() ? `<button class="br ${sel === null ? 'on' : ''}" data-id="group" aria-pressed="${sel === null}"><span class="tg" style="background:var(--orange)">ALL</span><span><b>Company view</b><small>Directors, CEO &amp; CFO · read-only roll-up</small></span></button>` : ''}</div>
         <button class="btn p" id="go">Continue →</button></div></section></div>`;
     app.querySelectorAll('.br:not(.dis)').forEach(b => b.onclick = () => { sel = b.dataset.id === 'group' ? null : Number(b.dataset.id); render(); });
     $('#go').onclick = async () => { try { await api('/api/auth/branch', { method: 'POST', body: { branch_id: sel } }); ME = await api('/api/me'); location.hash = sel === null ? '#/group' : '#/dashboard'; } catch (e) { toast(e.message, true); } };
@@ -342,7 +346,7 @@ async function viewClaim(pid, cid) {
 function claimPrintHtml(c) {
   const s = c.summary; const b = ME.current_branch;
   return `<!doctype html><html><head><meta charset="utf-8"><title>Payment claim ${esc(c.project.number)} #${c.number}</title><style>body{font-family:Inter,system-ui,sans-serif;font-size:12px;color:#111;margin:32px;max-width:900px}h1{font-size:20px;margin:0}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border-bottom:1px solid #ddd;padding:6px 8px;text-align:left}td.n,th.n{text-align:right}.tot td{font-weight:700}.hd{display:flex;justify-content:space-between;align-items:flex-start}.box{border:1px solid #ccc;padding:10px 14px;margin-top:16px}.muted{color:#666}@media print{button{display:none}}</style></head><body>
-  <div class="hd"><div><h1>Payment claim #${c.number}</h1><div class="muted">Premier Services Group — ${esc(b.name)} branch · prepared in RōSK</div></div><div style="text-align:right"><div><b>Project:</b> ${esc(c.project.number)} ${esc(c.project.name)}</div><div><b>To:</b> ${esc(c.project.head_contractor || c.project.client || '[Head contractor]')}</div><div><b>Period ending:</b> ${dt(c.period_end)}</div><div><b>Date served:</b> ${c.served_at ? dt(c.served_at) : '[on serving]'}</div></div></div>
+  <div class="hd"><div><h1>Payment claim #${c.number}</h1><div class="muted">${esc(ME.company?.name || '')} — ${esc(b.name)} branch · prepared in RōSK</div></div><div style="text-align:right"><div><b>Project:</b> ${esc(c.project.number)} ${esc(c.project.name)}</div><div><b>To:</b> ${esc(c.project.head_contractor || c.project.client || '[Head contractor]')}</div><div><b>Period ending:</b> ${dt(c.period_end)}</div><div><b>Date served:</b> ${c.served_at ? dt(c.served_at) : '[on serving]'}</div></div></div>
   <div class="box">This is a payment claim made under the <i>Building and Construction Industry Security of Payment Act 2002 (Vic)</i> [confirm applicable Act / contract clause]. Reference date: ${dt(c.period_end)}.</div>
   <table><thead><tr><th>Item</th><th class="n">Contract</th><th class="n">Previously claimed</th><th class="n">This claim</th><th class="n">Cumulative</th><th class="n">%</th></tr></thead><tbody>
   ${c.lines.map(l => `<tr><td>${esc(l.description)}</td><td class="n">${money(l.contract_amt)}</td><td class="n">${money(l.prev_claimed)}</td><td class="n">${money(l.this_claim)}</td><td class="n">${money(l.prev_claimed + l.this_claim)}</td><td class="n">${l.contract_amt ? ((l.prev_claimed + l.this_claim) / l.contract_amt * 100).toFixed(0) : 0}%</td></tr>`).join('')}
@@ -393,23 +397,39 @@ async function viewSettings() {
 
 async function viewAudit() {
   const rows = await api('/api/audit?limit=200');
-  shell('#/audit', header(ME.current_branch ? esc(ME.current_branch.name) : 'Group', 'Audit log', 'Every sign-in, branch switch, grant, approval and edit — who, when, and in which branch.') +
+  shell('#/audit', header(ME.current_branch ? esc(ME.current_branch.name) : esc(ME.company?.name || 'Company'), 'Audit log', 'Every sign-in, branch switch, grant, approval and edit — who, when, and in which branch.') +
     `<section class="card"><div class="tw"><table><thead><tr><th>When</th><th>Who</th><th>Branch</th><th>Action</th><th>Entity</th><th>Detail</th></tr></thead><tbody>${rows.map(r => `<tr><td class="small">${esc(r.at)}</td><td>${esc(r.user_name || 'system')}</td><td>${esc(r.branch_code || '—')}</td><td><b>${esc(r.action)}</b></td><td class="small muted">${esc(r.entity || '')} ${r.entity_id || ''}</td><td class="small muted" style="white-space:normal;max-width:420px">${esc(r.detail || '')}</td></tr>`).join('')}</tbody></table></div></section>`);
 }
 
 async function viewGroup() {
   if (!isDirector()) { location.hash = '#/dashboard'; return; }
   const g = await api('/api/group/overview'); const t = g.group;
-  const STATUS = { live: ['ok', 'Live'], onboarding: ['grey', 'To onboard'], launch_2027: ['warn', 'Launch Jan 2027'] };
-  shell('#/group', header('Premier Services Group · all branches', 'Group overview', 'Live roll-up of every branch. Branch Managers only ever see their own row. ' + esc(g.note), `<button class="btn" id="addBranch">+ Add branch</button>`) +
+  const STATUS = { live: ['ok', 'Live'], onboarding: ['grey', 'To onboard'], launch_2027: ['warn', 'Launching'] };
+  shell('#/group', header(`${esc(g.company.name)} · all branches`, 'Company overview', 'Live roll-up of every branch. Branch Managers only ever see their own row. ' + esc(g.note), `<button class="btn" id="addBranch">+ Add branch</button>`) +
     `<div class="kpis">${kpi('Live contract value', mK(t.contract), `across ${t.jobs} active jobs`)}${kpi('Claimed to date', mK(t.claimed), t.contract ? pct(t.claimed / t.contract) + ' of contract' : '')}${kpi('Forecast margin', pct(t.forecast_margin_pct, 1), 'on forecast cost')}${kpi('Open variations', mK(t.open_vo), t.open_vo_n + ' awaiting client')}${kpi('Claims awaiting approval', t.unapproved, 'with Branch Managers')}</div>
     <section class="card"><div class="ch"><h2>Branch performance</h2><span class="small muted">Click a branch to enter it with director permissions</span></div><div class="tw"><table><thead><tr><th>Branch</th><th>Offices</th><th>Branch Manager</th><th class="c">Users</th><th class="n">Active jobs</th><th class="n">Contract value</th><th class="n">Claimed</th><th class="n">Fcst margin</th><th class="n">Open VOs</th><th style="width:130px">Programme</th><th>Status</th></tr></thead><tbody>
     ${g.branches.map(b => `<tr class="click" data-branch="${b.id}"><td><span class="tag">${esc(b.code)}</span> <b>${esc(b.name)}</b></td><td class="small">${esc(b.offices || '')}</td><td>${esc(b.branch_managers.join(', ') || '—')}</td><td class="c">${b.users}</td><td class="n">${b.active_jobs}</td><td class="n">${b.active_jobs ? (b.currency !== 'AUD' ? b.currency + ' ' : '') + mK(b.totals.contract) : '—'}</td><td class="n">${b.active_jobs ? mK(b.totals.claimed) : '—'}</td><td class="n">${b.active_jobs ? pct(b.totals.forecast_margin_pct, 1) : '—'}</td><td class="n">${b.totals.open_vo_n ? mK(b.totals.open_vo) : '—'}</td><td><div class="bar"><i style="width:${b.programme_health}%"></i></div></td><td><span class="pill ${(STATUS[b.status] || ['grey'])[0]}">${(STATUS[b.status] || [0, b.status])[1]}</span></td></tr>`).join('')}</tbody></table></div></section>
     <div class="grid3"><section class="card pad stack"><h2 style="font-size:15px">What a branch controls</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li>Its own users, roles and job grants</li><li>Job numbering prefix and cost-code set</li><li>Approval thresholds and response periods</li><li>Currency and GST</li></ul></section>
-    <section class="card pad stack"><h2 style="font-size:15px">What group sets once</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li>Chart of accounts mapping to Sage per entity</li><li>Standard estimating templates (dry / wet fire)</li><li>Margin and retention reporting rules</li><li>Director and finance accounts that span branches</li></ul></section>
-    <section class="card pad stack"><h2 style="font-size:15px">Cross-branch access</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li>A user can belong to several branches with a different role in each</li><li>Switching branch keeps you signed in; data and permissions change</li><li>Group view is read-only — changes are made inside a branch</li><li>The audit log records which branch every action was taken in</li></ul></section></div>`);
+    <section class="card pad stack"><h2 style="font-size:15px">What the company sets once</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li>Accounting system mapping (${esc(g.company.accounting || 'Sage, MYOB, Xero, Jobpac')}) per entity</li><li>Standard cost-code and schedule templates per trade</li><li>Margin and retention reporting rules</li><li>Director and finance accounts that span branches</li></ul></section>
+    <section class="card pad stack"><h2 style="font-size:15px">Cross-branch access</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li>A user can belong to several branches with a different role in each</li><li>Switching branch keeps you signed in; data and permissions change</li><li>Company view is read-only — changes are made inside a branch</li><li>The audit log records which branch every action was taken in</li></ul></section></div>`);
   app.querySelectorAll('tr[data-branch]').forEach(trw => trw.onclick = async () => { await api('/api/auth/branch', { method: 'POST', body: { branch_id: +trw.dataset.branch } }); ME = await api('/api/me'); location.hash = '#/dashboard'; });
   $('#addBranch').onclick = () => modal(`<h2>Add branch</h2><form class="form" id="bf"><label>Code<input class="in" name="code" required placeholder="WA"></label><label>Name<input class="in" name="name" required></label><label>Country<select class="in" name="country"><option>AU</option><option>NZ</option></select></label><label>Currency<input class="in" name="currency" value="AUD"></label><label>GST rate<input class="in" name="gst_rate" type="number" step="0.01" value="0.10"></label><label>Offices<input class="in" name="offices"></label><label class="full">First Branch Manager email (optional)<input class="in" name="bm_email" type="email"></label><label class="full">Their name<input class="in" name="bm_name"></label><div class="full actions"><button class="btn p">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`, (m, close) => $('#bf', m).onsubmit = async (e) => { e.preventDefault(); const v = formVals(e.target); try { const b = await api('/api/group/branches', { method: 'POST', body: v }); if (v.bm_email) { const r = await api(`/api/group/branches/${b.id}/members`, { method: 'POST', body: { email: v.bm_email, name: v.bm_name, role: 'branch_manager' } }); if (r.temp_password) toast(`Branch created. BM temp password: ${r.temp_password}`); } close(); viewGroup(); } catch (er) { toast(er.message, true); } });
+}
+
+// ---------- RōSK platform (all companies) ----------
+async function viewPlatform() {
+  if (!ME.user.is_platform_admin) { location.hash = '#/dashboard'; return; }
+  const cos = await api('/api/platform/companies');
+  const tot = cos.reduce((t, c) => ({ value: t.value + c.live_value, jobs: t.jobs + c.live_jobs, users: t.users + c.users }), { value: 0, jobs: 0, users: 0 });
+  shell('#/platform', header('RōSK · platform', 'All companies', 'Every customer on RōSK. Each company is fully isolated — entering one gives you a director\'s view inside it.', `<button class="btn p" id="addCo">+ Onboard company</button>`) +
+    `<div class="kpis">${kpi('Companies', cos.length, cos.filter(c => c.plan === 'enterprise').length + ' enterprise')}${kpi('Live contract value', mK(tot.value), 'across all customers')}${kpi('Live jobs', tot.jobs, '')}${kpi('Users', tot.users, 'active accounts')}</div>
+    <section class="card"><div class="ch"><h2>Customers</h2><span class="small muted">Click a company to enter it</span></div><div class="tw"><table><thead><tr><th>Company</th><th>Trades</th><th>Plan</th><th>Accounting</th><th class="c">Branches</th><th class="c">Users</th><th class="n">Live jobs</th><th class="n">Live value</th><th>Last activity</th><th>Status</th></tr></thead><tbody>
+    ${cos.map(c => `<tr class="click" data-co="${c.id}"><td><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.short_name || '')} · ${esc(c.country)}</span></td><td>${esc(c.trades || '')}</td><td><span class="pill ${c.plan === 'enterprise' ? 'bad' : 'info'}">${esc(c.plan)}</span></td><td>${esc(c.accounting || '—')}</td><td class="c">${c.branches}</td><td class="c">${c.users}</td><td class="n">${c.live_jobs}</td><td class="n">${mK(c.live_value)}</td><td class="small muted">${dt(c.last_activity)}</td><td><span class="pill ${c.status === 'active' ? 'ok' : 'grey'}">${esc(c.status)}</span></td></tr>`).join('')}</tbody></table></div></section>
+    <div class="grid3"><section class="card pad stack"><h2 style="font-size:15px">What a company gets</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li>Its own branches, users, roles and job grants</li><li>Cost-code and schedule templates per trade</li><li>Accounting integration mapped to its own entities</li><li>Its own audit log — nothing shared between customers</li></ul></section>
+    <section class="card pad stack"><h2 style="font-size:15px">Plans</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li><b>Standard</b> — single branch, up to ~25 users</li><li><b>Enterprise</b> — multi-branch, multi-entity, SSO, company-wide roll-up</li><li>Pricing model to be confirmed (per user / per branch / per job value)</li></ul></section>
+    <section class="card pad stack"><h2 style="font-size:15px">Platform controls</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li>Onboard a company with its first branch and admin</li><li>Enter any company as a director for support</li><li>Every platform action is logged against the admin</li></ul></section></div>`);
+  app.querySelectorAll('tr[data-co]').forEach(trw => trw.onclick = async () => { await api('/api/auth/company', { method: 'POST', body: { company_id: +trw.dataset.co } }); ME = await api('/api/me'); location.hash = '#/group'; });
+  $('#addCo').onclick = () => modal(`<h2>Onboard a company</h2><form class="form" id="cf"><label class="full">Company name<input class="in" name="name" required></label><label>Short name<input class="in" name="short_name"></label><label>Trades<input class="in" name="trades" placeholder="Fire · Hydraulic"></label><label>Plan<select class="in" name="plan"><option value="standard">Standard</option><option value="enterprise">Enterprise</option><option value="pilot">Pilot</option></select></label><label>Country<select class="in" name="country"><option>AU</option><option>NZ</option></select></label><label>Accounting system<input class="in" name="accounting" placeholder="Xero / MYOB / Sage / Jobpac"></label><label>First branch code<input class="in" name="first_branch_code" placeholder="SYD"></label><label class="full">First branch name<input class="in" name="first_branch_name"></label><label>Admin email<input class="in" name="admin_email" type="email"></label><label>Admin name<input class="in" name="admin_name"></label><div class="full actions"><button class="btn p">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`, (m, close) => $('#cf', m).onsubmit = async (e) => { e.preventDefault(); try { const r = await api('/api/platform/companies', { method: 'POST', body: formVals(e.target) }); toast(r.admin_temp_password ? `Created. Admin temp password: ${r.admin_temp_password}` : 'Created'); close(); viewPlatform(); } catch (er) { toast(er.message, true); } });
 }
 
 // ---------- router ----------
@@ -423,6 +443,8 @@ async function route() {
     if (!ME) return viewLogin();
     if (seg[0] === 'login') return viewLogin();
     if (seg[0] === 'branch') return viewBranch();
+    if (seg[0] === 'platform') return viewPlatform();
+    if (ME.user.is_platform_admin && !ME.company) return viewPlatform();
     if (!ME.current_branch && !(ME.role === 'group_admin')) return viewBranch();
     if (!ME.current_branch) { if (seg[0] === 'audit') return viewAudit(); return viewGroup(); }
     switch (seg[0]) {
