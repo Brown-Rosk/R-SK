@@ -1,0 +1,15 @@
+{
+  "name": "psg-project-controls",
+  "version": "0.1.0",
+  "description": "Premier Services Group — project controls (projects, variations, progress claims) with branch and per-PM permissions. Zero dependencies: Node 22+ only.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node scripts/seed.js",
+    "reset": "node scripts/seed.js --reset",
+    "test": "node --no-warnings --test test/*.test.js"
+  },
+  "engines": { "node": ">=22.13" },
+  "license": "UNLICENSED",
+  "private": true
+}
