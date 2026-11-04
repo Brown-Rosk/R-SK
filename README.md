@@ -1,4 +1,4 @@
-# PSG Project Controls
+# RōSK — Project Controls
 
 Project controls for Premier Services Group's fire / mechanical / electrical contracting work: projects, budget vs cost, variations register, progress claims — with **branch-level partitioning** and **per-PM job permissions** enforced on the server.
 

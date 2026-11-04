@@ -1,4 +1,4 @@
-// PSG Project Controls — single-page front end (no build step). Hash routes, fetch API, plain DOM.
+// RōSK — single-page front end (no build step). Hash routes, fetch API, plain DOM.
 const $ = (s, el = document) => el.querySelector(s);
 const app = $('#app');
 let ME = null; // { user, branches, current_branch, role }
@@ -67,7 +67,7 @@ function shell(active, content) {
   ];
   app.innerHTML = `<div class="app">
     <nav class="side" aria-label="Main">
-      <div class="brand"><div class="logo">PSG</div><div><b>Project Controls</b></div></div>
+      <div class="brand"><div class="logo" aria-hidden="true">R</div><div><b>RōSK</b><small>Project controls</small></div></div>
       <button class="switch" id="switchBranch" aria-label="Switch branch"><span class="tag ${group ? 'or' : ''}">${group ? 'ALL' : esc(b.code)}</span><span style="flex:1">${group ? 'Group view' : esc(b.name)}<small>${ME.role ? esc(ROLE[ME.role] || ME.role) : ''} · Switch branch ▾</small></span></button>
       ${nav.map(n => n[0] === 'sep' ? '<div class="sep"></div>' : `<a class="nav ${active === n[0] ? 'on' : ''}" href="${n[0]}">${n[1]}${n[2]}</a>`).join('')}
       <div class="who">Signed in as<br><b>${esc(ME.user.name)}</b><br><button id="logout">Sign out</button></div>
@@ -82,11 +82,11 @@ const kpi = (l, v, d, cls = '') => `<div class="card kpi"><div class="l">${l}</d
 // ---------- views ----------
 async function viewLogin(err) {
   app.innerHTML = `<div class="login"><aside class="hero">
-    <div class="brand" style="padding:0"><div class="logo" style="width:40px;height:40px;font-size:15px">PSG</div><div><b style="font-size:16px">Project Controls</b></div></div>
+    <div class="brand" style="padding:0"><div class="logo" style="width:40px;height:40px;font-size:18px" aria-hidden="true">R</div><div><b style="font-size:20px;letter-spacing:.02em">RōSK</b><small>Project controls for contractors</small></div></div>
     <div style="max-width:420px;display:flex;flex-direction:column;gap:16px"><h1>One sign-in. Your branch. Your jobs.</h1>
       <p>Sign in, pick the branch you work in, and the system shows only the projects you've been granted there. Branch Managers see the whole branch; directors can switch between states or view the group.</p>
       <ul><li>Data is partitioned by branch — a VIC PM can't query a QLD job even by URL</li><li>Branches you're not a member of are greyed out</li><li>Every sign-in, branch switch and change is logged</li></ul></div>
-    <div class="small" style="color:#8A97A8">Premier Services Group · Fire · HVAC · Electrical · AU &amp; NZ</div></aside>
+    <div class="small" style="color:#8F9198">RōSK · Premier Services Group · Fire · HVAC · Electrical · AU &amp; NZ</div></aside>
     <section class="panel"><form class="lbox" id="loginForm"><div><h2 style="font-size:18px">Sign in</h2><div class="sub">Microsoft 365 single sign-on will replace this in the pilot.</div></div>
       <label class="f">Work email<input class="in" name="email" type="email" autocomplete="username" required value="jayden.brown@premiersg.com.au"></label>
       <label class="f">Password<input class="in" name="password" type="password" autocomplete="current-password" required value="psg2026"></label>
@@ -102,7 +102,7 @@ async function viewBranch() {
   if (mine.length === 1 && !isDirector() && !ME.current_branch) { await api('/api/auth/branch', { method: 'POST', body: { branch_id: mine[0].id } }); ME = await api('/api/me'); location.hash = '#/dashboard'; return; }
   let sel = ME.current_branch?.id ?? (mine[0]?.id ?? null);
   const render = () => {
-    app.innerHTML = `<div class="login"><aside class="hero"><div class="brand" style="padding:0"><div class="logo" style="width:40px;height:40px;font-size:15px">PSG</div><div><b style="font-size:16px">Project Controls</b></div></div>
+    app.innerHTML = `<div class="login"><aside class="hero"><div class="brand" style="padding:0"><div class="logo" style="width:40px;height:40px;font-size:18px" aria-hidden="true">R</div><div><b style="font-size:20px;letter-spacing:.02em">RōSK</b><small>Project controls for contractors</small></div></div>
       <div style="max-width:420px;display:flex;flex-direction:column;gap:16px"><h1>Choose your branch</h1><p>You can switch branch any time from the top-left menu without signing out. Your role can differ per branch.</p></div><div></div></aside>
       <section class="panel"><div class="lbox">
         <div style="display:flex;align-items:center;gap:10px"><span class="av">${esc(ME.user.initials)}</span><div><b>${esc(ME.user.name)}</b><div class="small muted">${esc(ME.user.email)}</div></div><button class="btn s" id="lo" style="margin-left:auto">Not you?</button></div>
@@ -342,7 +342,7 @@ async function viewClaim(pid, cid) {
 function claimPrintHtml(c) {
   const s = c.summary; const b = ME.current_branch;
   return `<!doctype html><html><head><meta charset="utf-8"><title>Payment claim ${esc(c.project.number)} #${c.number}</title><style>body{font-family:Inter,system-ui,sans-serif;font-size:12px;color:#111;margin:32px;max-width:900px}h1{font-size:20px;margin:0}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border-bottom:1px solid #ddd;padding:6px 8px;text-align:left}td.n,th.n{text-align:right}.tot td{font-weight:700}.hd{display:flex;justify-content:space-between;align-items:flex-start}.box{border:1px solid #ccc;padding:10px 14px;margin-top:16px}.muted{color:#666}@media print{button{display:none}}</style></head><body>
-  <div class="hd"><div><h1>Payment claim #${c.number}</h1><div class="muted">Premier Services Group — ${esc(b.name)} branch</div></div><div style="text-align:right"><div><b>Project:</b> ${esc(c.project.number)} ${esc(c.project.name)}</div><div><b>To:</b> ${esc(c.project.head_contractor || c.project.client || '[Head contractor]')}</div><div><b>Period ending:</b> ${dt(c.period_end)}</div><div><b>Date served:</b> ${c.served_at ? dt(c.served_at) : '[on serving]'}</div></div></div>
+  <div class="hd"><div><h1>Payment claim #${c.number}</h1><div class="muted">Premier Services Group — ${esc(b.name)} branch · prepared in RōSK</div></div><div style="text-align:right"><div><b>Project:</b> ${esc(c.project.number)} ${esc(c.project.name)}</div><div><b>To:</b> ${esc(c.project.head_contractor || c.project.client || '[Head contractor]')}</div><div><b>Period ending:</b> ${dt(c.period_end)}</div><div><b>Date served:</b> ${c.served_at ? dt(c.served_at) : '[on serving]'}</div></div></div>
   <div class="box">This is a payment claim made under the <i>Building and Construction Industry Security of Payment Act 2002 (Vic)</i> [confirm applicable Act / contract clause]. Reference date: ${dt(c.period_end)}.</div>
   <table><thead><tr><th>Item</th><th class="n">Contract</th><th class="n">Previously claimed</th><th class="n">This claim</th><th class="n">Cumulative</th><th class="n">%</th></tr></thead><tbody>
   ${c.lines.map(l => `<tr><td>${esc(l.description)}</td><td class="n">${money(l.contract_amt)}</td><td class="n">${money(l.prev_claimed)}</td><td class="n">${money(l.this_claim)}</td><td class="n">${money(l.prev_claimed + l.this_claim)}</td><td class="n">${l.contract_amt ? ((l.prev_claimed + l.this_claim) / l.contract_amt * 100).toFixed(0) : 0}%</td></tr>`).join('')}

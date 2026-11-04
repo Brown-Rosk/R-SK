@@ -1,5 +1,5 @@
 @echo off
-title PSG Project Controls
+title RōSK
 cd /d "%~dp0"
 where node >nul 2>nul
 if errorlevel 1 (
@@ -7,7 +7,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo Starting PSG Project Controls... leave this window open while you use it.
+echo Starting RōSK... leave this window open while you use it.
 start "" http://localhost:3000
 node server.js
 pause

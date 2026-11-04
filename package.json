@@ -1,5 +1,5 @@
 {
-  "name": "psg-project-controls",
+  "name": "rosk-project-controls",
   "version": "0.1.0",
   "description": "Premier Services Group — project controls (projects, variations, progress claims) with branch and per-PM permissions. Zero dependencies: Node 22+ only.",
   "main": "server.js",
