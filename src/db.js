@@ -27,6 +27,8 @@ function migrate(d) {
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY, company_id INTEGER REFERENCES companies(id), email TEXT UNIQUE NOT NULL COLLATE NOCASE, name TEXT NOT NULL,
     initials TEXT, password_hash TEXT, is_group_admin INTEGER NOT NULL DEFAULT 0, is_platform_admin INTEGER NOT NULL DEFAULT 0,
+    -- employment (for timesheets & labour costing)
+    employment_type TEXT, trade TEXT, classification TEXT, home_branch_id INTEGER, annual_salary REAL, hourly_rate_override REAL, mobile TEXT, start_date TEXT,
     active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 
   CREATE TABLE IF NOT EXISTS branches (
@@ -51,7 +53,7 @@ function migrate(d) {
     contract_value REAL NOT NULL DEFAULT 0, retention_pct REAL NOT NULL DEFAULT 0.05,
     retention_cap_pct REAL NOT NULL DEFAULT 0.05, claim_day INTEGER NOT NULL DEFAULT 5,
     start_date TEXT, pc_date TEXT, status TEXT NOT NULL DEFAULT 'live',
-    tender_margin_pct REAL, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    tender_margin_pct REAL, discipline TEXT NOT NULL DEFAULT 'fire', created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (branch_id, number));
 
   -- level: lead | member | readonly
@@ -110,6 +112,41 @@ function migrate(d) {
     id INTEGER PRIMARY KEY, at TEXT NOT NULL DEFAULT (datetime('now')), user_id INTEGER, branch_id INTEGER,
     action TEXT NOT NULL, entity TEXT, entity_id INTEGER, detail TEXT);
   CREATE INDEX IF NOT EXISTS audit_branch ON audit_log(branch_id, at);
+
+  -- ---- Wage rates: per company, state (branch country/state code), trade, classification. Loaded from the applicable EBA / award. ----
+  CREATE TABLE IF NOT EXISTS wage_rates (
+    id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL REFERENCES companies(id), state TEXT NOT NULL, trade TEXT NOT NULL,
+    classification TEXT NOT NULL, base_hourly REAL NOT NULL, ot_1 REAL NOT NULL DEFAULT 1.5, ot_2 REAL NOT NULL DEFAULT 2.0,
+    sat_mult REAL NOT NULL DEFAULT 1.5, sun_mult REAL NOT NULL DEFAULT 2.0, daily_allowances REAL NOT NULL DEFAULT 0,
+    oncost_pct REAL NOT NULL DEFAULT 0.32, ordinary_hours REAL NOT NULL DEFAULT 7.6, source TEXT, effective_from TEXT,
+    UNIQUE (company_id, state, trade, classification));
+
+  -- ---- Timesheets ----
+  CREATE TABLE IF NOT EXISTS timesheet_entries (
+    id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), project_id INTEGER NOT NULL REFERENCES projects(id),
+    cost_code TEXT, work_date TEXT NOT NULL, start_time TEXT, end_time TEXT, break_min INTEGER NOT NULL DEFAULT 30,
+    hours REAL NOT NULL DEFAULT 0, ordinary_hours REAL NOT NULL DEFAULT 0, ot1_hours REAL NOT NULL DEFAULT 0, ot2_hours REAL NOT NULL DEFAULT 0,
+    rate_used REAL, cost REAL NOT NULL DEFAULT 0, notes TEXT, status TEXT NOT NULL DEFAULT 'open',
+    approved_by INTEGER REFERENCES users(id), approved_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+  CREATE INDEX IF NOT EXISTS ts_user_date ON timesheet_entries(user_id, work_date);
+  CREATE INDEX IF NOT EXISTS ts_project ON timesheet_entries(project_id, status);
+
+  -- ---- Onboarding (per company; public page via token) ----
+  CREATE TABLE IF NOT EXISTS onboarding (
+    company_id INTEGER PRIMARY KEY REFERENCES companies(id), token TEXT UNIQUE NOT NULL, welcome TEXT,
+    video_links TEXT, uniform_link TEXT, timesheet_instructions TEXT, contacts TEXT, documents TEXT, updated_at TEXT);
+
+  -- ---- Toolbox talks ----
+  CREATE TABLE IF NOT EXISTS toolbox_talks (
+    id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, held_on TEXT NOT NULL,
+    topic TEXT NOT NULL, presenter_id INTEGER REFERENCES users(id), notes TEXT, hazards TEXT, actions TEXT,
+    attendees TEXT, attendee_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+
+  -- ---- Files (toolbox talk sheets, sign-on photos, onboarding docs) stored on disk under data/files ----
+  CREATE TABLE IF NOT EXISTS files (
+    id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL REFERENCES companies(id), entity TEXT NOT NULL, entity_id INTEGER NOT NULL,
+    name TEXT NOT NULL, mime TEXT, size INTEGER, path TEXT NOT NULL, uploaded_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')));
   `);
   // Guard against a database created by an older build.
   const cols = d.prepare("PRAGMA table_info('branches')").all().map(c => c.name);

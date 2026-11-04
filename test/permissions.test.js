@@ -175,3 +175,64 @@ test('company boundary: tenants are isolated; platform admin can enter any compa
   await call(admin, '/api/auth/company', 'POST', { company_id: cos[1].id });
   assert.equal((await call(admin, '/api/group/overview')).body.company.short_name, 'Harbourline');
 });
+
+test('timesheets: clock in/out costs against the state rate, approval flows to job labour', async () => {
+  const jb = await login('jayden.brown@premiersg.com.au'); await enter(jb, 1);
+  const staff = (await call(jb, '/api/staff')).body; const worker = staff.find(u => u.employment_type === 'wages' && u.home_branch === 'VIC' && !/Kurzemnieks/.test(u.name));
+  const w = await login(worker.email); await enter(w, 1);
+  const me = (await call(w, '/api/timesheets/me')).body; assert.ok(me.jobs.length >= 1);
+  const pid = me.jobs[0].id;
+  // manual 9.6 h weekday entry → 7.6 ordinary + 2 OT1
+  const e = (await call(w, '/api/timesheets/entries', 'POST', { project_id: pid, work_date: '2026-11-03', start_time: '06:30', end_time: '16:36', break_min: 30 })).body;
+  assert.equal(e.hours, 9.6); assert.ok(e.cost > 0);
+  const rates = (await call(jb, '/api/rates')).body; const rate = rates.find(r => r.state === 'VIC' && r.trade === worker.trade && r.classification === worker.classification);
+  const expected = (7.6 * rate.base_hourly + 2 * rate.base_hourly * rate.ot_1 + rate.daily_allowances) * (1 + rate.oncost_pct);
+  assert.ok(Math.abs(e.cost - expected) < 0.05, `cost ${e.cost} vs ${expected}`);
+  // cannot clock in to a job not granted
+  assert.equal((await call(w, '/api/timesheets/clock-in', 'POST', { project_id: 3 })).status, 404);
+  // submit, PM approves, labour cost code updated
+  await call(w, '/api/timesheets/submit', 'POST', { week: '2026-11-02' });
+  const before = (await call(jb, `/api/projects/${pid}/labour`)).body.totals.approved_cost;
+  const r = await call(jb, '/api/timesheets/approve', 'POST', { ids: [e.id] }); assert.equal(r.body.approved, 1);
+  const after = (await call(jb, `/api/projects/${pid}/labour`)).body.totals.approved_cost;
+  assert.ok(Math.abs(after - before - e.cost) < 0.05);
+  const cc = (await call(jb, `/api/projects/${pid}`)).body.cost_codes.find(c => /labour/i.test(c.name)); assert.ok(Math.abs(cc.actual - after) < 0.05, 'labour cost code reflects approved timesheets');
+  // field staff cannot approve, raise VOs, see attendance, or record toolbox talks
+  assert.equal((await call(w, '/api/timesheets/approve', 'POST', { ids: [e.id] })).status, 403);
+  assert.equal((await call(w, `/api/projects/${pid}/variations`, 'POST', { title: 'nope' })).status, 403);
+  assert.equal((await call(w, '/api/attendance')).status, 403);
+  assert.equal((await call(w, `/api/projects/${pid}/toolbox`, 'POST', { held_on: '2026-11-04', topic: 'nope' })).status, 403);
+});
+
+test('attendance: expected vs signed in per job', async () => {
+  const jb = await login('jayden.brown@premiersg.com.au'); await enter(jb, 1);
+  const a = (await call(jb, '/api/attendance?date=2026-11-03')).body;
+  assert.ok(a.totals.expected > 0); assert.equal(a.totals.present + a.totals.away + a.totals.elsewhere, a.projects.reduce((n, p) => n + p.people.filter(x => !x.visitor).length, 0));
+  const job = a.projects.find(p => p.expected > 0); assert.ok(job.people.every(x => ['present', 'signed_out', 'away', 'elsewhere'].includes(x.status)));
+});
+
+test('WIP: earned = contract × cost %, wip = earned − claimed; discipline split sums to total', async () => {
+  const d = await login('director@premiersg.com.au'); await enter(d, null);
+  const w = (await call(d, '/api/insights/wip')).body;
+  const p = w.branches[0].projects[0];
+  assert.ok(Math.abs(p.earned - p.contract_total * p.pct_cost) < 1);
+  assert.ok(Math.abs(p.wip - (p.earned - p.claimed)) < 1);
+  assert.ok(Math.abs(w.totals.underclaimed - w.totals.unearned - w.totals.wip) < 1);
+  const disc = (await call(d, '/api/insights/by-discipline')).body;
+  assert.ok(Math.abs(disc.disciplines.reduce((a, x) => a + x.totals.contract, 0) - disc.totals.contract) < 1);
+  const pm = (await call(d, '/api/insights/by-pm')).body; assert.ok(pm.pms.length > 10);
+  const wade = await login('wade.kneale@premiersg.com.au'); await enter(wade, 1);
+  assert.equal((await call(wade, '/api/insights/wip')).status, 403); // PMs don't get the CFO views
+});
+
+test('toolbox talks: supervisors record on their jobs; onboarding page is public', async () => {
+  const nk = await login('nathan.kurzemnieks@premiersg.com.au'); await enter(nk, 1);
+  const t = await call(nk, '/api/projects/1/toolbox', 'POST', { held_on: '2026-11-04', topic: 'Test talk', attendees: [{ id: 1, name: 'x' }], files: [{ name: 'sheet.txt', mime: 'text/plain', data: Buffer.from('signed').toString('base64') }] });
+  assert.equal(t.status, 201);
+  assert.equal((await call(nk, '/api/projects/5/toolbox', 'POST', { held_on: '2026-11-04', topic: 'nope' })).status, 404); // not his job
+  const list = (await call(nk, '/api/toolbox?project_id=1')).body; assert.ok(list.some(x => x.topic === 'Test talk' && x.files.length === 1));
+  const jb = await login('jayden.brown@premiersg.com.au'); await enter(jb, 1);
+  const o = (await call(jb, '/api/onboarding')).body; assert.ok(o.qr_svg.startsWith('<svg'));
+  const pub = await fetch(base + '/onboard/' + o.token); assert.equal(pub.status, 200); assert.ok((await pub.text()).includes('Welcome to Premier Services Group'));
+  assert.equal((await fetch(base + '/onboard/nope')).status, 404);
+});

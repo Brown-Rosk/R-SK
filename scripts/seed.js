@@ -164,6 +164,10 @@ function seed(db) {
     // ---------- every other state, plus extra VIC jobs ----------
     require('./seed-branches').seedBranches(db, B, { bm: U.jb, pms: [U.wk, U.nb, U.mm, U.lg], sups: [U.nk], fin: U.fin }, C_PSG);
     require('./seed-branches').seedSecondCompany(db, C_HH);
+    // disciplines on the hand-built VIC jobs
+    db.prepare("UPDATE projects SET discipline = 'mechanical' WHERE number IN ('26-0438')").run();
+    db.prepare("UPDATE projects SET discipline = 'electrical' WHERE number IN ('26-0449')").run();
+    require('./seed-people').seedPeople(db);
     db.prepare("INSERT INTO audit_log (user_id, branch_id, action, detail) VALUES (NULL, ?, 'seed', 'Sample data loaded')").run(B.VIC);
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }

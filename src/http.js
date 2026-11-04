@@ -19,7 +19,7 @@ function parseCookies(header = '') {
   return out;
 }
 
-function readBody(req, limit = 1e6) {
+function readBody(req, limit = 12e6) {
   return new Promise((resolve, reject) => {
     let data = ''; let size = 0;
     req.on('data', c => { size += c.length; if (size > limit) { reject(new HttpError(413, 'Body too large')); req.destroy(); } data += c; });

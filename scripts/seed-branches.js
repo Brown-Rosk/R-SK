@@ -49,8 +49,9 @@ function makeProject(db, branchId, users, spec) {
   const pmId = users.pms[spec.pmIdx % users.pms.length];
   const start = new Date(spec.start); const pc = addM(start, spec.months);
   const status = spec.status || 'live';
-  const pid = Number(db.prepare(`INSERT INTO projects (branch_id, number, name, client, head_contractor, lead_pm_id, contract_value, retention_pct, retention_cap_pct, claim_day, start_date, pc_date, tender_margin_pct, status)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(branchId, spec.number, spec.name, spec.client, spec.hc, pmId, spec.value, 0.05, 0.05, 5, iso(start), iso(pc), spec.margin, status).lastInsertRowid);
+  const disc = { fire: 'fire', mech: 'mechanical', elec: 'electrical' }[spec.type] || 'fire';
+  const pid = Number(db.prepare(`INSERT INTO projects (branch_id, number, name, client, head_contractor, lead_pm_id, contract_value, retention_pct, retention_cap_pct, claim_day, start_date, pc_date, tender_margin_pct, status, discipline)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(branchId, spec.number, spec.name, spec.client, spec.hc, pmId, spec.value, 0.05, 0.05, 5, iso(start), iso(pc), spec.margin, status, status === 'live' || true ? disc : disc).lastInsertRowid);
   const grant = db.prepare('INSERT OR REPLACE INTO project_access (project_id, user_id, level, granted_by, granted_at) VALUES (?,?,?,?,?)');
   grant.run(pid, pmId, 'lead', users.bm, iso(start) + ' 09:00:00');
   if (users.sups.length) grant.run(pid, users.sups[spec.pmIdx % users.sups.length], 'member', users.bm, iso(start) + ' 09:00:00');
@@ -58,12 +59,14 @@ function makeProject(db, branchId, users, spec) {
 
   // cost codes: forecast = value*(1-margin) with drift; actual = forecast * pct * noise
   const drift = between(-0.015, 0.03); // margin erosion/gain
+  const costLag = between(0.78, 0.98); // cost in Sage lags site progress a little
+  const claimBias = rnd() < 0.3 ? between(1.18, 1.4) : between(0.95, 1.08); // ~28% of jobs claim ahead of work done
   const costTotal = spec.value * (1 - spec.margin);
   const cc = db.prepare('INSERT INTO cost_codes (project_id, code, name, budget, committed, actual, forecast) VALUES (?,?,?,?,?,?,?)');
   COST_TEMPLATES[t].forEach(([code, name, share]) => {
     const budget = r100(costTotal * share); const forecast = r100(budget * (1 + drift * between(0.3, 1.8)));
     const isMat = /materials|Plant|gear|Cable|Luminaires|Subcontract/.test(name);
-    const actual = r100(forecast * Math.min(1, pct * between(0.85, 1.12)) * (code === '60' ? (pct > 0.9 ? 0.5 : 0.05) : 1));
+    const actual = r100(forecast * Math.min(1, pct * costLag * between(0.95, 1.05)) * (code === '60' ? (pct > 0.9 ? 0.5 : 0.05) : 1));
     cc.run(pid, code, name, budget, isMat && pct > 0 ? r100(forecast * between(0.92, 1)) : 0, actual, forecast);
   });
   // SOV
@@ -101,7 +104,7 @@ function makeProject(db, branchId, users, spec) {
   const lineProgress = sovRows.map((s, i) => { const lo = i / sovRows.length * 0.9, span = 0.45; return (p) => s.code === 'A1' ? Math.min(1, p * 3) : Math.max(0, Math.min(1, (p - lo) / span)); });
   const totalMonths = spec.months; const prevCum = sovRows.map(() => 0); const prevVo = new Map(); let prevCert = 0; let prevCumTotal = 0;
   periods.forEach((pend, i) => {
-    const monthsIn = (pend - start) / (86400000 * 30.4); const p = Math.min(pct, monthsIn / totalMonths * (pct / Math.max(0.05, Math.min(1, ((TODAY - start) / (86400000 * 30.4)) / totalMonths))));
+    const monthsIn = (pend - start) / (86400000 * 30.4); const p = Math.min(1, Math.min(pct, monthsIn / totalMonths * (pct / Math.max(0.05, Math.min(1, ((TODAY - start) / (86400000 * 30.4)) / totalMonths)))) * claimBias);
     const isLast = i === periods.length - 1;
     const served = new Date(Date.UTC(pend.getUTCFullYear(), pend.getUTCMonth() + 1, 4)); const cert = new Date(served); cert.setUTCDate(cert.getUTCDate() + 18);
     const status = isLast ? 'served' : 'certified';
@@ -199,6 +202,7 @@ function seedSecondCompany(db, companyId) {
     P('HH-26-0151', 'Botany cold store — ESFR upgrade', 'Lineage', 'Total Construction', 'fire', 0.9, 0.18, 0.24, '2026-08-03', 8, 0),
     P('HH-26-0139', 'Randwick school hall — fire services', 'NSW Dept of Education', 'Buildcorp', 'fire', 0.6, 0.19, 0.86, '2026-02-09', 9, 1),
   ].forEach(p => makeProject(db, bid, users, p));
+  db.prepare("UPDATE projects SET discipline = 'hydraulic' WHERE branch_id = ? AND number IN ('HH-26-0142','HH-26-0139')").run(bid);
 }
 
 module.exports = { seedBranches, seedSecondCompany, BRANCH_DATA, VIC_EXTRA };

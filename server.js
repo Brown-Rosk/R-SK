@@ -14,6 +14,9 @@ function buildApp(dbFile) {
   require('./src/routes/variations')(r);
   require('./src/routes/claims')(r);
   require('./src/routes/admin')(r);
+  require('./src/routes/insights')(r);
+  require('./src/routes/people')(r);
+  require('./src/routes/site')(r);
   r.get('/api/health', () => ({ ok: true, time: new Date().toISOString() }));
   r.get('/.*', serveStatic(path.join(__dirname, 'public')));
   return { router: r, db };

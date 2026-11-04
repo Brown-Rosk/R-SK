@@ -47,6 +47,15 @@ PSG_DB=/path/to/psg.sqlite node server.js   # different database file (default: 
 - Users & permissions, branch settings, audit log
 - Group overview for directors; add branches and appoint their first Branch Manager
 
+### Added in v0.5
+- **Insights** (directors, Branch Managers, Finance): performance by project manager, by discipline (fire / mechanical / electrical / hydraulic), and a **WIP schedule** — percentage-of-completion on cost, earned vs claimed, underclaimed (asset) vs unearned revenue (liability), CSV export.
+- **Timesheets**: phone-friendly sign in / sign out per job, manual entries, weekly submit; supervisors/PMs approve; approved labour (with overtime and on-costs) flows into the job's labour cost code.
+- **Wage rates** per state × trade × classification (base, OT multipliers, allowances, on-cost %). Seeded figures are **placeholders** — load the applicable EBA / award before payroll relies on them.
+- **Attendance**: per job per day — crew expected, signed in, away, on another job.
+- **Onboarding**: per-company welcome page (videos, uniform link, timesheet instructions, contacts, documents) on a public link with a printable **QR code**.
+- **Toolbox talks**: supervisors record talks with attendees, hazards, actions and signed-sheet uploads.
+- New **field** role for site staff (timesheets only).
+
 ## Not yet (next builds)
 
 - Microsoft 365 single sign-on (the auth layer is isolated in `src/auth.js` so this is a swap, not a rewrite)

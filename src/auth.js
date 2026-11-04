@@ -10,7 +10,7 @@ const crypto = require('node:crypto');
 const { HttpError } = require('./http');
 
 const SESSION_TTL_H = 12;
-const ROLES = ['supervisor', 'pm', 'estimator', 'branch_manager', 'finance'];
+const ROLES = ['field', 'supervisor', 'pm', 'estimator', 'branch_manager', 'finance']; // field = site staff: timesheets, attendance of own job, toolbox attendance only
 const SEES_ALL_BRANCH = new Set(['branch_manager', 'finance']);
 
 // ---- passwords (scrypt; swap for Microsoft 365 SSO later without touching routes) ----
@@ -97,6 +97,7 @@ function loadProject(ctx, projectId) {
 }
 function requireWrite(ctx, project) {
   if (project.access_level === 'readonly') throw new HttpError(403, 'Read-only access to this job');
+  if (ctx.role === 'field') throw new HttpError(403, 'Field staff can log time on this job but not change it');
   if (ctx.role === 'finance') throw new HttpError(403, 'Finance is read-only on jobs');
 }
 
