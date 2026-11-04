@@ -80,7 +80,7 @@ test('director: group view and any branch', async () => {
   assert.equal((await enter(d, null)).status, 200);
   const g = (await call(d, '/api/group/overview')).body;
   assert.equal(g.branches.length, 7);
-  assert.equal(g.branches[0].code, 'VIC');
+  assert.equal(g.branches[0].code, 'QLD'); // largest first
   assert.ok(g.branches[0].totals.contract > 10e6);
   assert.ok(g.group.contract > 150e6 && g.group.contract < 250e6);
   await enter(d, 1);
