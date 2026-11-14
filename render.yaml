@@ -1,0 +1,25 @@
+# Render blueprint: deploy from the GitHub repo with "New > Blueprint". Persistent disk holds the database and uploads.
+services:
+  - type: web
+    name: rosk
+    runtime: docker
+    plan: starter
+    region: singapore          # closest Render region to Australia; move to AU-hosted Postgres in the pilot phase
+    healthCheckPath: /api/health
+    disk:
+      name: rosk-data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PSG_DB
+        value: /data/rosk.sqlite
+      - key: PSG_FILES
+        value: /data/files
+      - key: ROSK_ADMIN_PASSWORD   # platform admin (admin@rosk.app) — set in the Render dashboard, never in the repo
+        sync: false
+      - key: ROSK_DEMO_PASSWORD    # password for all seeded demo users (default psg2026 if unset)
+        sync: false
+      - key: ROSK_SEED             # "demo" seeds the PSG + Harbourline demo data on first start; "empty" starts with just the admin
+        value: demo

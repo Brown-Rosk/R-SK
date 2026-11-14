@@ -107,7 +107,7 @@ async function viewLogin(err) {
       ${err ? `<div class="err">${esc(err)}</div>` : ''}
       <button class="btn p" type="submit">Sign in</button>
       <div class="small muted">Demo sign-ins (password <code>psg2026</code>): <b>admin@rosk.app</b> (RōSK platform) · director@premiersg.com.au (PSG directors) · jayden.brown@premiersg.com.au (PSG VIC Branch Manager) · wade.kneale@premiersg.com.au (PM) · marcus.delaney@harbourlinehydraulics.com.au (small customer)</div></form></section></div>`;
-  $('#loginForm').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/auth/login', { method: 'POST', body: formVals(e.target) }); ME = await api('/api/me'); location.hash = ME.user.is_platform_admin && !ME.company ? '#/platform' : '#/branch'; } catch (er) { viewLogin(er.message); } };
+  $('#loginForm').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/auth/login', { method: 'POST', body: formVals(e.target) }); ME = await api('/api/me'); _go(ME.user.is_platform_admin && !ME.company ? '#/platform' : '#/branch'); } catch (er) { viewLogin(er.message); } };
 }
 
 async function viewBranch() {
@@ -625,6 +625,7 @@ async function route() {
     if (ME.user.is_platform_admin && !ME.company) return viewPlatform();
     if (!ME.current_branch && !(ME.role === 'group_admin')) return viewBranch();
     if (!ME.current_branch) { if (seg[0] === 'audit') return viewAudit(); if (seg[0] === 'insights') return seg[1] === 'discipline' ? viewInsightsDiscipline() : seg[1] === 'wip' ? viewInsightsWip() : viewInsightsPm(); if (seg[0] === 'staff') return viewStaff(q); if (seg[0] === 'onboarding') return viewOnboarding(); return viewGroup(); }
+    if (ME.role === 'field' && !['timesheet', 'projects', 'branch', 'login'].includes(seg[0])) { location.hash = '#/timesheet'; return; }
     switch (seg[0]) {
       case 'dashboard': return viewDashboard();
       case 'projects':
@@ -655,4 +656,5 @@ async function route() {
   }
 }
 window.addEventListener('hashchange', route);
+const _go = (h) => { if (location.hash === h) route(); else location.hash = h; };
 route();

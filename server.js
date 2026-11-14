@@ -24,10 +24,22 @@ function buildApp(dbFile) {
 
 if (require.main === module) {
   const { router, db } = buildApp();
+  const PROD = process.env.NODE_ENV === 'production';
   const users = db.prepare('SELECT COUNT(*) n FROM users').get().n;
-  if (!users) { console.log('Empty database — seeding sample data (run `npm run reset` to re-seed).'); require('./scripts/seed').seed(db); }
+  if (!users) {
+    if ((process.env.ROSK_SEED || 'demo') === 'demo') { console.log('Empty database — seeding demo data.'); require('./scripts/seed').seed(db); }
+    else { console.log('Empty database — creating platform admin only.'); require('./scripts/seed').seedAdminOnly(db); }
+  }
+  // Production: platform admin password comes from the environment, never the seed default.
+  if (PROD) {
+    const pw = process.env.ROSK_ADMIN_PASSWORD;
+    if (!pw) { console.error('ROSK_ADMIN_PASSWORD must be set in production.'); process.exit(1); }
+    db.prepare('UPDATE users SET password_hash = ? WHERE is_platform_admin = 1').run(require('./src/auth').hashPassword(pw));
+    if (process.env.ROSK_DEMO_PASSWORD) db.prepare('UPDATE users SET password_hash = ? WHERE is_platform_admin = 0').run(require('./src/auth').hashPassword(process.env.ROSK_DEMO_PASSWORD));
+    require('./src/backup').schedule(db);
+  }
   const port = Number(process.env.PORT || 3000);
-  createServer(router).listen(port, () => console.log(`PSG Project Controls running at http://localhost:${port}`));
+  createServer(router).listen(port, () => console.log(`RōSK running at http://localhost:${port}${PROD ? ' (production)' : ''}`));
 }
 
 module.exports = { buildApp };

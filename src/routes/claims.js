@@ -64,7 +64,7 @@ function checks(db, p, claim, lines, branch) {
   const out = [];
   const today = new Date().toISOString().slice(0, 10);
   out.push(claim.serve_by >= today ? { level: 'ok', text: `Within the reference-date window (serve by ${claim.serve_by})` }
-                                   : { level: 'fail', text: `Serve-by date ${claim.serve_by} has passed — check contract for late-claim consequences` });
+                                   : { level: 'check', text: `Serve-by date ${claim.serve_by} has passed — serve as soon as possible and check the contract for late-claim consequences` });
   const over = lines.filter(l => l.prev_claimed + l.this_claim > l.contract_amt + 0.005);
   out.push(over.length ? { level: 'fail', text: `${over.length} line(s) claim more than their contract value: ${over.map(l => l.description).join('; ')}` } : { level: 'ok', text: 'No line exceeds its contract value' });
   const neg = lines.filter(l => l.this_claim < 0);

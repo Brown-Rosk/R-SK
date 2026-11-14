@@ -78,6 +78,17 @@ scripts/seed.js      sample data
 test/                node:test suite
 ```
 
+## Deploying to the cloud (Render)
+
+1. Push this repo to GitHub (RōSK's organisation).
+2. On render.com: **New → Blueprint**, pick the repo. Render reads `render.yaml` and creates the web service with a 5 GB persistent disk at `/data`.
+3. In the service's **Environment**, set `ROSK_ADMIN_PASSWORD` (platform admin sign-in for admin@rosk.app) and, for a demo, `ROSK_DEMO_PASSWORD` (password for every demo user; leave unset to keep `psg2026`). Set `ROSK_SEED=empty` instead of `demo` for a clean instance with no sample companies.
+4. Deploy. The first start seeds data (~20 s). Open the URL Render gives you; add a custom domain (e.g. app.rosk.com.au) under Settings → Custom Domains.
+
+Backups: on start and nightly at 03:00 AEDT to `/data/backups` (last 14 kept). Download them from the Render shell, or point a scheduled job at them — before the pilot, these move to object storage.
+
+Any Docker host works the same way: `docker build -t rosk . && docker run -p 3000:3000 -v rosk-data:/data -e NODE_ENV=production -e ROSK_ADMIN_PASSWORD=… rosk`.
+
 ## Production notes
 
 For a pilot beyond one machine: put it behind HTTPS (any reverse proxy), set a long random `PSG_DB` path on persistent storage, back up the SQLite file nightly (it's one file), and change the seeded passwords or move to SSO first. SQLite is fine for a branch; group-wide concurrent use would move to Postgres — the SQL is standard and the data layer is in one file.

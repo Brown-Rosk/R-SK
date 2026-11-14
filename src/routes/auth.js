@@ -8,7 +8,7 @@ module.exports = (r) => {
     const u = ctx.db.prepare('SELECT * FROM users WHERE email = ? AND active = 1').get(String(email || ''));
     if (!u || !A.verifyPassword(String(password || ''), u.password_hash)) throw new HttpError(401, 'Email or password incorrect');
     const sid = A.createSession(ctx.db, u.id);
-    ctx.res.setHeader('Set-Cookie', `psg_session=${sid}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${12 * 3600}`);
+    ctx.res.setHeader('Set-Cookie', `psg_session=${sid}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${12 * 3600}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
     ctx.user = { id: u.id }; ctx.db.prepare('INSERT INTO audit_log (user_id, action, detail) VALUES (?, ?, ?)').run(u.id, 'login', null);
     return { ok: true };
   });

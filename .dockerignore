@@ -1,0 +1,4 @@
+data/
+.git/
+test/tmp-*
+*.zip

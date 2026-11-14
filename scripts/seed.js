@@ -104,7 +104,8 @@ function seed(db) {
       db.prepare('UPDATE claims SET certified_amt = ? WHERE id = ?').run(Math.round(certified * 100) / 100, cid);
     });
     // Claim 7 in draft for October
-    const c7 = Number(claim.run(p1, 7, '2026-10-31', 'draft', '2026-11-05', null, null, null, U.wk, null).lastInsertRowid);
+    const _t = new Date(); const _due = new Date(Date.UTC(_t.getUTCFullYear(), _t.getUTCMonth() + (_t.getUTCDate() > 5 ? 1 : 0), 5)).toISOString().slice(0, 10);
+    const c7 = Number(claim.run(p1, 7, '2026-10-31', 'draft', _due, null, null, null, U.wk, null).lastInsertRowid);
     const draft7 = { A2: 65600, A3: 107200, A4: 24600, A5: 41400, A6: 18600, A9: 17000 };
     Object.entries(S1).forEach(([code, id], idx) => line.run(c7, 'base', id, `${code} ${db.prepare('SELECT description d FROM sov_items WHERE id=?').get(id).d}`, db.prepare('SELECT amount a FROM sov_items WHERE id=?').get(id).a, cum[code][5], draft7[code] || 0, idx));
     [[10, 58000, 0], [11, 9850, 0], [12, 8900, 8900]].forEach(([n, prev, t], idx) => { const v = db.prepare('SELECT * FROM variations WHERE id=?').get(V1[n]); line.run(c7, 'variation', V1[n], `VO-0${n} ${v.title}`, v.approved_amt, prev, t, 1000 + idx); });
@@ -184,4 +185,7 @@ if (require.main === module) {
   console.log(`Seeded. All sample users sign in with password "${PW}". Try jayden.brown@premiersg.com.au (Branch Manager) or wade.kneale@premiersg.com.au (PM).`);
 }
 
-module.exports = { seed, PW };
+function seedAdminOnly(db) {
+  db.prepare('INSERT INTO users (company_id, email, name, initials, password_hash, is_platform_admin) VALUES (NULL,?,?,?,?,1)').run('admin@rosk.app', 'RōSK Admin', 'RA', A.hashPassword(PW));
+}
+module.exports = { seed, seedAdminOnly, PW };

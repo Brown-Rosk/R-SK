@@ -11,7 +11,7 @@ const r100 = (x) => Math.round(x / 100) * 100;
 const iso = (d) => d.toISOString().slice(0, 10);
 const addM = (d, n) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, d.getUTCDate()));
 const eom = (d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
-const TODAY = new Date('2026-11-04');
+const TODAY = new Date(new Date().toISOString().slice(0, 10)); // seed is relative to the day it runs
 
 const SOV_TEMPLATES = {
   fire: [['A1', 'Design, documentation & approvals', 0.04], ['A2', 'Wet fire — risers, mains & pumps', 0.18], ['A3', 'Wet fire — floor sprinkler rough-in', 0.27], ['A4', 'Wet fire — fit-off & heads', 0.09], ['A5', 'Dry fire — detection, FIP & cabling', 0.15], ['A6', 'Dry fire — EWIS & occupant warning', 0.07], ['A7', 'Hydrants, hose reels & extinguishers', 0.10], ['A8', 'Testing, commissioning & certification', 0.03], ['A9', 'Preliminaries', 0.07]],
@@ -119,7 +119,7 @@ function makeProject(db, branchId, users, spec) {
   });
   // current draft claim (period ending 31 Oct 2026 → serve by 5 Nov) if the last served one was September or earlier
   if (!periods.length || iso(periods[periods.length - 1]) < '2026-10-31') {
-    const cid = Number(claim.run(pid, periods.length + 1, '2026-10-31', rnd() < 0.35 ? 'internal_review' : 'draft', '2026-11-05', null, null, null, pmId, null, null).lastInsertRowid);
+    const cid = Number(claim.run(pid, periods.length + 1, iso(eom(addM(TODAY, -1))), rnd() < 0.35 ? 'internal_review' : 'draft', iso(new Date(Date.UTC(TODAY.getUTCFullYear(), TODAY.getUTCMonth(), 5))) >= iso(TODAY) ? iso(new Date(Date.UTC(TODAY.getUTCFullYear(), TODAY.getUTCMonth(), 5))) : iso(new Date(Date.UTC(TODAY.getUTCFullYear(), TODAY.getUTCMonth() + 1, 5))), null, null, null, pmId, null, null).lastInsertRowid);
     sovRows.forEach((s, k) => { const target = r100(s.amt * lineProgress[k](pct)); line.run(cid, 'base', s.id, `${s.code} ${s.desc}`, s.amt, prevCum[k], Math.max(0, target - prevCum[k]), k); });
     approvedVos.forEach((v, k) => { const prev = prevVo.get(v.id) || 0; line.run(cid, 'variation', v.id, `VO-${String(v.n).padStart(3, '0')} ${v.title}`, v.amt, prev, v.amt - prev, 1000 + k); });
   }
