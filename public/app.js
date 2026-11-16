@@ -95,18 +95,13 @@ const kpi = (l, v, d, cls = '') => `<div class="card kpi"><div class="l">${l}</d
 
 // ---------- views ----------
 async function viewLogin(err) {
-  app.innerHTML = `<div class="login"><aside class="hero">
-    <div class="brand" style="padding:0"><div class="logo" style="width:40px;height:40px;font-size:18px" aria-hidden="true">R</div><div><b style="font-size:20px;letter-spacing:.02em">RōSK</b><small>Project controls for contractors</small></div></div>
-    <div style="max-width:420px;display:flex;flex-direction:column;gap:16px"><h1>One sign-in. Your branch. Your jobs.</h1>
-      <p>Project controls for contractors: variations, progress claims, budget vs cost and who's allowed to see what — built for how fire, mechanical, electrical and hydraulic businesses actually run jobs.</p>
-      <ul><li>Each company's data is fully isolated; within it, each branch is its own boundary</li><li>PMs and supervisors see only the jobs they've been granted</li><li>Every sign-in, branch switch and change is logged</li></ul></div>
-    <div class="small" style="color:#8F9198">RōSK · Project controls for contractors · AU &amp; NZ</div></aside>
-    <section class="panel"><form class="lbox" id="loginForm"><div><h2 style="font-size:18px">Sign in</h2><div class="sub">Microsoft 365 single sign-on will replace this in the pilot.</div></div>
-      <label class="f">Work email<input class="in" name="email" type="email" autocomplete="username" required value="jayden.brown@premiersg.com.au"></label>
-      <label class="f">Password<input class="in" name="password" type="password" autocomplete="current-password" required value="psg2026"></label>
+  app.innerHTML = `<div class="login ${err ? 'quick' : ''}"><div class="hero"><div class="wm">RōSK</div><div class="rb"></div><div class="sl">Controls for Projects</div></div>
+    <section class="panel"><form class="lbox" id="loginForm">
+      <label class="f">Work email<input class="in" name="email" type="email" autocomplete="username" required placeholder="you@company.com"></label>
+      <label class="f">Password<input class="in" name="password" type="password" autocomplete="current-password" required></label>
       ${err ? `<div class="err">${esc(err)}</div>` : ''}
-      <button class="btn p" type="submit">Sign in</button>
-      <div class="small muted">Demo sign-ins (password <code>psg2026</code>): <b>admin@rosk.app</b> (RōSK platform) · director@premiersg.com.au (PSG directors) · jayden.brown@premiersg.com.au (PSG VIC Branch Manager) · wade.kneale@premiersg.com.au (PM) · marcus.delaney@harbourlinehydraulics.com.au (small customer)</div></form></section></div>`;
+      <button class="btn p" type="submit">Sign in</button></form>
+      <details class="demo"><summary>Demo accounts</summary><p><b>admin@rosk.app</b> (RōSK platform) · director@premiersg.com.au (directors) · jayden.brown@premiersg.com.au (VIC Branch Manager) · wade.kneale@premiersg.com.au (PM) · marcus.delaney@harbourlinehydraulics.com.au (small customer) — ask for the demo password.</p></details></section></div>`;
   $('#loginForm').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/auth/login', { method: 'POST', body: formVals(e.target) }); ME = await api('/api/me'); _go(ME.user.is_platform_admin && !ME.company ? '#/platform' : '#/branch'); } catch (er) { viewLogin(er.message); } };
 }
 
@@ -117,9 +112,8 @@ async function viewBranch() {
   if (mine.length === 1 && !isDirector() && !ME.current_branch) { await api('/api/auth/branch', { method: 'POST', body: { branch_id: mine[0].id } }); ME = await api('/api/me'); location.hash = ME.role === 'field' ? '#/timesheet' : '#/dashboard'; return; }
   let sel = ME.current_branch?.id ?? (mine[0]?.id ?? null);
   const render = () => {
-    app.innerHTML = `<div class="login"><aside class="hero"><div class="brand" style="padding:0"><div class="logo" style="width:40px;height:40px;font-size:18px" aria-hidden="true">R</div><div><b style="font-size:20px;letter-spacing:.02em">RōSK</b><small>Project controls for contractors</small></div></div>
-      <div style="max-width:420px;display:flex;flex-direction:column;gap:16px"><div class="eyebrow" style="color:#8F9198">${esc(ME.company?.name || '')}</div><h1>Choose your branch</h1><p>You can switch branch any time from the top-left menu without signing out. Your role can differ per branch.</p></div><div></div></aside>
-      <section class="panel"><div class="lbox">
+    app.innerHTML = `<div class="login quick"><div class="hero"><div class="wm">RōSK</div><div class="rb"></div><div class="sl">${esc(ME.company?.name || '')} · choose your branch</div></div>
+      <section class="panel"><div class="lbox wide">
         <div style="display:flex;align-items:center;gap:10px"><span class="av">${esc(ME.user.initials)}</span><div><b>${esc(ME.user.name)}</b><div class="small muted">${esc(ME.user.email)}</div></div><button class="btn s" id="lo" style="margin-left:auto">Not you?</button></div>
         <div class="branches">${ME.branches.map(b => `<button class="br ${b.role ? '' : 'dis'} ${sel === b.id ? 'on' : ''}" data-id="${b.id}" ${b.role ? '' : 'disabled'} aria-pressed="${sel === b.id}"><span class="tg">${esc(b.code)}</span><span><b>${esc(b.name)}</b><small>${b.role ? esc(b.offices || '') + ' · ' + esc(ROLE[b.role] || b.role) : 'No access — ask that Branch Manager'}</small></span></button>`).join('')}
           ${isDirector() ? `<button class="br ${sel === null ? 'on' : ''}" data-id="group" aria-pressed="${sel === null}"><span class="tg" style="background:var(--orange)">ALL</span><span><b>Company view</b><small>Directors, CEO &amp; CFO · read-only roll-up</small></span></button>` : ''}</div>
