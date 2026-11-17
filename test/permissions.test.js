@@ -207,7 +207,7 @@ test('timesheets: clock in/out costs against the state rate, approval flows to j
 test('attendance: expected vs signed in per job', async () => {
   const jb = await login('jayden.brown@premiersg.com.au'); await enter(jb, 1);
   const a = (await call(jb, '/api/attendance?date=2026-11-03')).body;
-  assert.ok(a.totals.expected > 0); assert.equal(a.totals.present + a.totals.away + a.totals.elsewhere, a.projects.reduce((n, p) => n + p.people.filter(x => !x.visitor).length, 0));
+  assert.ok(a.totals.expected > 0); assert.equal(a.totals.present + a.totals.away + a.totals.elsewhere, a.projects.reduce((n, p) => n + p.people.length, 0));
   const job = a.projects.find(p => p.expected > 0); assert.ok(job.people.every(x => ['present', 'signed_out', 'away', 'elsewhere'].includes(x.status)));
 });
 

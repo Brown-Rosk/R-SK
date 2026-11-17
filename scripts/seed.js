@@ -145,7 +145,7 @@ function seed(db) {
     db.prepare('UPDATE claims SET certified_amt = ? WHERE id = ?').run(Math.round(t3a * 0.95 * 100) / 100, c3a);
 
     // ---------- Project 4: Palmer Court workshop (Lachlan) — just awarded ----------
-    const p4 = Number(proj.run(B.VIC, '26-0470', '8-10 Palmer Court, Mount Waverley — workshop & spray booth', '[Client]', '[Head contractor]', U.lg, 486000, 0.05, 0.05, 5, '2026-11-01', '2027-04-30', 0.18, 'live').lastInsertRowid);
+    const p4 = Number(proj.run(B.VIC, '26-0470', '8-10 Palmer Court, Mount Waverley — workshop & spray booth', 'Direct client (owner-builder)', 'Direct', U.lg, 486000, 0.05, 0.05, 5, '2026-11-01', '2027-04-30', 0.18, 'live').lastInsertRowid);
     access.run(p4, U.lg, 'lead', U.jb, '2026-10-27 09:00:00'); access.run(p4, U.wk, 'readonly', U.jb, '2026-10-27 09:00:00');
     [['10', 'Design & engineering', 22000, 0, 0, 22000], ['20', 'Wet fire — labour', 96000, 0, 0, 96000], ['21', 'Wet fire — materials', 148000, 0, 0, 148000], ['30', 'Dry fire — labour', 38000, 0, 0, 38000], ['31', 'Dry fire — materials', 52000, 0, 0, 52000], ['50', 'Preliminaries', 42000, 0, 0, 42000]].forEach(c => cc.run(p4, ...c));
     [['A1', 'Design & DTS report', 30000], ['A2', 'Hydrants & hose reels', 160000], ['A3', 'Spray booth suppression', 150000], ['A4', 'Detection & EWIS', 96000], ['A5', 'Preliminaries', 50000]].forEach((s, i) => sov.run(p4, s[0], s[1], s[2], i));

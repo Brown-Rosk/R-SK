@@ -117,7 +117,9 @@ module.exports = (r) => {
     return { ok: true };
   });
 
-  // Branch dashboard: everything the user can see, rolled up, plus the attention feed.
+  function money0(n) { n = Number(n) || 0; return n >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + Math.round(n / 1e3) + 'k' : '$' + Math.round(n); }
+
+// Branch dashboard: everything the user can see, rolled up, plus the attention feed.
   r.get('/api/dashboard', A.requireBranch, (ctx) => {
     const s = A.projectScope(ctx);
     const projects = ctx.db.prepare(`SELECT p.*, u.name lead_pm_name FROM projects p LEFT JOIN users u ON u.id = p.lead_pm_id WHERE ${s.sql} AND p.status = 'live'`).all(...s.params)
@@ -129,16 +131,22 @@ module.exports = (r) => {
     const ids = projects.map(p => p.id);
     const attention = ids.length ? ctx.db.prepare(`SELECT a.*, p.number project_number FROM attention_items a JOIN projects p ON p.id = a.project_id
       WHERE a.resolved = 0 AND a.project_id IN (${ids.map(() => '?').join(',')}) ORDER BY a.severity DESC, a.created_at LIMIT 12`).all(...ids) : [];
-    // Generated attention: overdue variations, claims due within 7 days
+    // Generated attention: claims to approve or serve, variations waiting on the client, labour drift, timesheets to approve
     const generated = [];
     if (ids.length) {
       const inList = ids.map(() => '?').join(',');
-      ctx.db.prepare(`SELECT v.id, v.number, v.title, v.project_id, p.number pn, julianday('now') - julianday(v.submitted_at) days FROM variations v JOIN projects p ON p.id = v.project_id
-        WHERE v.status = 'submitted' AND v.project_id IN (${inList}) AND julianday('now') - julianday(v.submitted_at) > ?`).all(...ids, ctx.branch.vo_response_days)
-        .forEach(v => generated.push({ tag: `${Math.floor(v.days)} days`, severity: 'warn', text: `VO-${String(v.number).padStart(3, '0')} ${v.title} — past the ${ctx.branch.vo_response_days}-day response period`, link: `#/projects/${v.project_id}/variations`, project_number: v.pn }));
-      ctx.db.prepare(`SELECT c.id, c.number, c.project_id, c.serve_by, p.number pn FROM claims c JOIN projects p ON p.id = c.project_id
-        WHERE c.status IN ('draft','internal_review','approved') AND c.project_id IN (${inList}) AND c.serve_by <= date('now', '+7 days')`).all(...ids)
-        .forEach(c => generated.push({ tag: `Due ${c.serve_by}`, severity: 'high', text: `Claim #${c.number} must be served by ${c.serve_by}`, link: `#/projects/${c.project_id}/claims/${c.id}`, project_number: c.pn }));
+      ctx.db.prepare(`SELECT c.id, c.number, c.project_id, c.serve_by, c.status, p.number pn FROM claims c JOIN projects p ON p.id = c.project_id
+        WHERE c.status IN ('draft','internal_review','approved') AND c.project_id IN (${inList}) AND c.serve_by <= date('now', '+7 days') ORDER BY c.serve_by`).all(...ids)
+        .forEach(c => generated.push({ tag: c.serve_by < new Date().toISOString().slice(0, 10) ? 'Late' : 'Due ' + c.serve_by.slice(5), severity: 'high', text: `Claim #${c.number} — ${c.status === 'approved' ? 'approved, not yet served' : c.status === 'internal_review' ? 'awaiting approval' : 'still a draft'} — serve by ${c.serve_by}`, link: `#/projects/${c.project_id}/claims/${c.id}`, project_number: c.pn }));
+      if (['branch_manager', 'finance'].includes(ctx.role) || ctx.user.is_group_admin) ctx.db.prepare(`SELECT c.id, c.number, c.project_id, (SELECT COALESCE(SUM(this_claim),0) FROM claim_lines l WHERE l.claim_id = c.id) amt, p.number pn FROM claims c JOIN projects p ON p.id = c.project_id WHERE c.status = 'internal_review' AND c.project_id IN (${inList}) AND c.serve_by > date('now', '+7 days') ORDER BY c.serve_by`).all(...ids)
+        .forEach(c => generated.push({ tag: 'Approve', severity: 'warn', text: `Claim #${c.number} (${money0(c.amt)}) is waiting for your approval`, link: `#/projects/${c.project_id}/claims/${c.id}`, project_number: c.pn }));
+      const vos = ctx.db.prepare(`SELECT v.id, v.number, v.title, v.project_id, v.submitted_amt amount, p.number pn, julianday('now') - julianday(v.submitted_at) days FROM variations v JOIN projects p ON p.id = v.project_id
+        WHERE v.status = 'submitted' AND v.project_id IN (${inList}) AND julianday('now') - julianday(v.submitted_at) > ? ORDER BY days DESC`).all(...ids, ctx.branch.vo_response_days);
+      vos.slice(0, 4).forEach(v => generated.push({ tag: `${Math.floor(v.days)} days`, severity: v.days > 2 * ctx.branch.vo_response_days ? 'high' : 'warn', text: `VO-${String(v.number).padStart(3, '0')} ${v.title} (${money0(v.amount)}) — no client response in ${Math.floor(v.days)} days`, link: `#/projects/${v.project_id}/variations`, project_number: v.pn }));
+      if (vos.length > 4) { const rest = vos.slice(4); generated.push({ tag: `${rest.length} more`, severity: 'warn', text: `${rest.length} other variations past the ${ctx.branch.vo_response_days}-day response period (${money0(rest.reduce((a, v) => a + (v.amount || 0), 0))})`, link: '#/variations', project_number: '' }); }
+      projects.filter(p => p.summary.tender_margin_pct != null && p.summary.forecast_margin_pct != null && p.summary.forecast_margin_pct < p.summary.tender_margin_pct - 0.02)
+        .forEach(p => generated.push({ tag: 'Margin', severity: 'high', text: `Forecast margin ${(p.summary.forecast_margin_pct * 100).toFixed(1)}% against ${(p.summary.tender_margin_pct * 100).toFixed(1)}% at tender`, link: `#/projects/${p.id}`, project_number: p.number }));
+      if (['supervisor', 'pm', 'branch_manager'].includes(ctx.role)) { const ts = ctx.db.prepare(`SELECT COUNT(*) n, COUNT(DISTINCT user_id) people FROM timesheet_entries WHERE status = 'submitted' AND project_id IN (${inList})`).get(...ids); if (ts.n) generated.push({ tag: 'Timesheets', severity: 'info', text: `${ts.n} timesheet entries from ${ts.people} people waiting for approval`, link: '#/approvals', project_number: '' }); }
     }
     return { totals: tot, projects, attention: [...generated, ...attention] };
   });

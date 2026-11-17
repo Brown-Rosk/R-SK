@@ -49,8 +49,9 @@ function hoursBetween(start, end, breakMin) {
 }
 
 function weekStart(d) { const x = new Date(d + 'T00:00:00Z'); const day = (x.getUTCDay() + 6) % 7; x.setUTCDate(x.getUTCDate() - day); return x.toISOString().slice(0, 10); }
-function today() { return new Date().toISOString().slice(0, 10); }
-function nowHM() { const d = new Date(); return String(d.getUTCHours() + 11).padStart(2, '0').slice(-2) + ':' + String(d.getUTCMinutes()).padStart(2, '0'); } // AEDT display; proper TZ per branch later
+const TZ = require('../tz');
+function today(ctx) { return TZ.todayIn(TZ.tzFor(ctx && ctx.branch)); }
+function nowHM(ctx) { return TZ.nowHMIn(TZ.tzFor(ctx && ctx.branch)); }
 
 // Recompute labour actuals on a project's labour cost code from approved timesheets (plus open ones as "uncosted" is not included).
 function syncLabour(db, projectId) {
@@ -111,16 +112,16 @@ module.exports = (r) => {
       WHERE t.user_id = ? AND t.work_date >= ? AND t.work_date < date(?, '+7 days') ORDER BY t.work_date, t.start_time`).all(userId, ws, ws);
   }
   r.get('/api/timesheets/me', A.requireBranch, (ctx) => {
-    const ws = ctx.query.week || weekStart(today());
+    const ws = ctx.query.week || weekStart(today(ctx));
     const open = ctx.db.prepare("SELECT t.*, p.number project_number FROM timesheet_entries t JOIN projects p ON p.id = t.project_id WHERE t.user_id = ? AND t.end_time IS NULL AND t.status = 'open' ORDER BY t.id DESC LIMIT 1").get(ctx.user.id);
     const me = ctx.db.prepare('SELECT employment_type, trade, classification FROM users WHERE id = ?').get(ctx.user.id);
-    return { week_start: ws, jobs: myJobs(ctx), entries: week(ctx, ctx.user.id, ws), clocked_in: open || null, me, today: today(), now: nowHM() };
+    return { week_start: ws, jobs: myJobs(ctx), entries: week(ctx, ctx.user.id, ws), clocked_in: open || null, me, today: today(ctx), now: nowHM(ctx) };
   });
   r.post('/api/timesheets/clock-in', A.requireBranch, (ctx) => {
     const pid = Number(ctx.body.project_id);
     A.loadProject(ctx, pid); // must be a job they can see
     if (ctx.db.prepare("SELECT 1 FROM timesheet_entries WHERE user_id = ? AND end_time IS NULL AND status = 'open'").get(ctx.user.id)) throw new HttpError(409, 'Already signed in — sign out first');
-    const info = ctx.db.prepare('INSERT INTO timesheet_entries (user_id, project_id, cost_code, work_date, start_time, notes) VALUES (?,?,?,?,?,?)').run(ctx.user.id, pid, ctx.body.cost_code || null, ctx.body.date || today(), ctx.body.time || nowHM(), ctx.body.notes || null);
+    const info = ctx.db.prepare('INSERT INTO timesheet_entries (user_id, project_id, cost_code, work_date, start_time, notes) VALUES (?,?,?,?,?,?)').run(ctx.user.id, pid, ctx.body.cost_code || null, ctx.body.date || today(ctx), ctx.body.time || nowHM(ctx), ctx.body.notes || null);
     A.audit(ctx, 'timesheet.clock_in', 'timesheet', Number(info.lastInsertRowid), { project_id: pid });
     return { ok: true, id: Number(info.lastInsertRowid) };
   });
@@ -128,7 +129,7 @@ module.exports = (r) => {
     const e = ctx.db.prepare("SELECT * FROM timesheet_entries WHERE user_id = ? AND end_time IS NULL AND status = 'open' ORDER BY id DESC LIMIT 1").get(ctx.user.id);
     if (!e) throw new HttpError(409, 'Not signed in');
     const user = ctx.db.prepare('SELECT * FROM users WHERE id = ?').get(ctx.user.id);
-    const end = ctx.body.time || nowHM(); const brk = ctx.body.break_min ?? 30;
+    const end = ctx.body.time || nowHM(ctx); const brk = ctx.body.break_min ?? 30;
     const hours = hoursBetween(e.start_time, end, brk);
     const c = costEntry(ctx.db, ctx, user, { ...e, hours });
     ctx.db.prepare('UPDATE timesheet_entries SET end_time = ?, break_min = ?, hours = ?, ordinary_hours = ?, ot1_hours = ?, ot2_hours = ?, rate_used = ?, cost = ?, notes = COALESCE(?, notes) WHERE id = ?')
@@ -153,7 +154,7 @@ module.exports = (r) => {
     ctx.db.prepare('DELETE FROM timesheet_entries WHERE id = ?').run(e.id); return { ok: true };
   });
   r.post('/api/timesheets/submit', A.requireBranch, (ctx) => {
-    const ws = ctx.body.week || weekStart(today());
+    const ws = ctx.body.week || weekStart(today(ctx));
     const n = ctx.db.prepare("UPDATE timesheet_entries SET status = 'submitted' WHERE user_id = ? AND status = 'open' AND end_time IS NOT NULL AND work_date >= ? AND work_date < date(?, '+7 days')").run(ctx.user.id, ws, ws).changes;
     A.audit(ctx, 'timesheet.submit', 'user', ctx.user.id, { week: ws, entries: n });
     return { ok: true, submitted: n };
@@ -162,7 +163,7 @@ module.exports = (r) => {
   // ---- approvals (PM / supervisor on their jobs; BM on all) ----
   r.get('/api/timesheets/approvals', A.requireRole('branch_manager', 'pm', 'supervisor', 'finance'), (ctx) => {
     const s = A.projectScope(ctx);
-    const ws = ctx.query.week || weekStart(today());
+    const ws = ctx.query.week || weekStart(today(ctx));
     const rows = ctx.db.prepare(`SELECT t.*, u.name user_name, u.initials, u.employment_type, u.trade, p.number project_number, p.name project_name FROM timesheet_entries t
       JOIN users u ON u.id = t.user_id JOIN projects p ON p.id = t.project_id WHERE ${s.sql} AND t.work_date >= ? AND t.work_date < date(?, '+7 days') AND t.end_time IS NOT NULL
       ORDER BY u.name, t.work_date, t.start_time`).all(...s.params, ws, ws);
@@ -183,15 +184,15 @@ module.exports = (r) => {
 
   // ---- attendance: per job, who was expected (crew granted to the job, wages/field staff) vs who signed in on a given day ----
   r.get('/api/attendance', A.requireRole('supervisor', 'pm', 'branch_manager', 'finance'), (ctx) => {
-    const date = ctx.query.date || today(); const dow = new Date(date + 'T00:00:00Z').getUTCDay();
+    const tz = TZ.tzFor(ctx.branch); const date = ctx.query.date || today(ctx); const dow = new Date(date + 'T00:00:00Z').getUTCDay();
     const s = A.projectScope(ctx);
     const projects = ctx.db.prepare(`SELECT p.id, p.number, p.name, p.discipline, u.name lead_pm_name FROM projects p LEFT JOIN users u ON u.id = p.lead_pm_id WHERE ${s.sql} AND p.status = 'live' ORDER BY p.number`).all(...s.params);
-    const crewQ = ctx.db.prepare(`SELECT u.id, u.name, u.initials, u.trade, u.mobile FROM project_access pa JOIN users u ON u.id = pa.user_id WHERE pa.project_id = ? AND u.active = 1 AND u.employment_type = 'wages' ORDER BY u.name`);
+    const crewQ = ctx.db.prepare(`SELECT u.id, u.name, u.initials, u.trade, u.mobile FROM project_access pa JOIN users u ON u.id = pa.user_id JOIN branch_members bm ON bm.user_id = u.id AND bm.branch_id = ? AND bm.role = 'field' WHERE pa.project_id = ? AND u.active = 1 AND u.employment_type = 'wages' ORDER BY u.name`);
     const inQ = ctx.db.prepare(`SELECT t.user_id, MIN(t.start_time) start_time, MAX(COALESCE(t.end_time, '')) end_time, SUM(t.hours) hours FROM timesheet_entries t WHERE t.project_id = ? AND t.work_date = ? GROUP BY t.user_id`);
     // someone signed in elsewhere today counts as "on another job", not absent
     const elsewhereQ = ctx.db.prepare(`SELECT p.number FROM timesheet_entries t JOIN projects p ON p.id = t.project_id WHERE t.user_id = ? AND t.work_date = ? AND t.project_id != ? LIMIT 1`);
     const out = projects.map(p => {
-      const crew = crewQ.all(p.id); const ins = new Map(inQ.all(p.id, date).map(x => [x.user_id, x]));
+      const crew = crewQ.all(ctx.branch.id, p.id); const ins = new Map(inQ.all(p.id, date).map(x => [x.user_id, x]));
       const people = crew.map(u => { const i = ins.get(u.id); if (i) return { ...u, status: i.end_time ? 'signed_out' : 'present', start_time: i.start_time, end_time: i.end_time || null, hours: i.hours }; const e = elsewhereQ.get(u.id, date, p.id); return { ...u, status: e ? 'elsewhere' : 'away', elsewhere: e?.number || null }; });
       // people who signed in but aren't on the crew list (e.g. borrowed from another job)
       ctx.db.prepare(`SELECT u.id, u.name, u.initials, u.trade, MIN(t.start_time) start_time, MAX(COALESCE(t.end_time,'')) end_time, SUM(t.hours) hours FROM timesheet_entries t JOIN users u ON u.id = t.user_id WHERE t.project_id = ? AND t.work_date = ? AND u.id NOT IN (${crew.map(() => '?').join(',') || '0'}) GROUP BY u.id`).all(p.id, date, ...crew.map(c => c.id))
@@ -200,7 +201,8 @@ module.exports = (r) => {
       return { ...p, expected: crew.length, present, away, elsewhere, people };
     });
     const t = out.reduce((a, p) => ({ expected: a.expected + p.expected, present: a.present + p.present, away: a.away + p.away, elsewhere: a.elsewhere + p.elsewhere }), { expected: 0, present: 0, away: 0, elsewhere: 0 });
-    return { date, is_weekend: dow === 0 || dow === 6, projects: out, totals: t };
+    const isToday = date === today(ctx);
+    return { date, is_weekend: dow === 0 || dow === 6, is_today: isToday, local_hour: isToday ? TZ.hourIn(tz) : null, timezone: tz, projects: out, totals: t };
   });
 
   // Labour summary for a job (hours and cost by person, by week) — shown on the project page

@@ -38,6 +38,8 @@ if (require.main === module) {
     if (process.env.ROSK_DEMO_PASSWORD) db.prepare('UPDATE users SET password_hash = ? WHERE is_platform_admin = 0').run(require('./src/auth').hashPassword(process.env.ROSK_DEMO_PASSWORD));
     require('./src/backup').schedule(db);
   }
+  // Demo data: keep today's sign-ins coming so attendance and timesheets show a live day (demo tenants only).
+  if ((process.env.ROSK_SEED || 'demo') === 'demo') require('./scripts/seed-today').schedule(db, (m) => console.log(m));
   const port = Number(process.env.PORT || 3000);
   createServer(router).listen(port, () => console.log(`RōSK running at http://localhost:${port}${PROD ? ' (production)' : ''}`));
 }
