@@ -65,7 +65,7 @@ const I = {
 function shell(active, content) {
   const b = ME.current_branch; const group = !b; const platformOnly = ME.user.is_platform_admin && !ME.company;
   const nav = platformOnly ? [['#/platform', I.globe, 'All companies']] : group ? [
-    ['#/group', I.globe, 'Company overview'], ['#/insights/pm', I.chart, 'Insights'], ['#/staff', I.people, 'Staff & rates'], ['#/onboarding', I.qr, 'Onboarding & QR'], ['#/audit', I.log, 'Audit log'],
+    ['#/group', I.globe, 'Company overview'], ['#/insights/pm', I.chart, 'Insights'], ['#/staff', I.people, 'Staff & rates'], ['#/onboarding', I.qr, 'Onboarding & QR'], ['#/company', I.cog, 'Company settings'], ['#/audit', I.log, 'Audit log'],
     ...(ME.user.is_platform_admin ? [['sep'], ['#/platform', I.globe, 'RōSK · all companies']] : []),
   ] : ME.role === 'field' ? [
     ['#/timesheet', I.clock, 'My timesheet'], ['#/projects', I.proj, 'My jobs'],
@@ -75,7 +75,7 @@ function shell(active, content) {
     ...(['supervisor', 'pm', 'branch_manager', 'finance', 'group_admin'].includes(ME.role) ? [['#/approvals', I.tick, 'Timesheet approvals']] : []),
     ...(isBM() || ME.role === 'finance' ? [['sep'], ['#/insights/pm', I.chart, 'Insights'], ['#/staff', I.people, 'Staff & rates']] : []),
     ...(isBM() ? [['#/onboarding', I.qr, 'Onboarding & QR'], ['#/users', I.users, 'Users & permissions'], ['#/settings', I.cog, 'Branch settings'], ['#/audit', I.log, 'Audit log']] : []),
-    ...(isDirector() ? [['#/group', I.globe, 'Company overview']] : []),
+    ...(isDirector() ? [['#/group', I.globe, 'Company overview'], ['#/company', I.cog, 'Company settings']] : []),
     ...(ME.user.is_platform_admin ? [['sep'], ['#/platform', I.globe, 'RōSK · all companies']] : []),
   ];
   app.innerHTML = `<div class="app">
@@ -83,6 +83,7 @@ function shell(active, content) {
       <div class="brand"><div class="logo" aria-hidden="true">R</div><div><b>RōSK</b><small>${esc(ME.company?.name || 'Platform')}</small></div></div>
       ${platformOnly ? '' : `<button class="switch" id="switchBranch" aria-label="Switch branch"><span class="tag ${group ? 'or' : ''}">${group ? 'ALL' : esc(b.code)}</span><span style="flex:1">${group ? 'Company view' : esc(b.name)}<small>${ME.role ? esc(ROLE[ME.role] || ME.role) : ''} · Switch branch ▾</small></span></button>`}
       ${nav.map(n => n[0] === 'sep' ? '<div class="sep"></div>' : `<a class="nav ${active === n[0] ? 'on' : ''}" href="${n[0]}">${n[1]}${n[2]}</a>`).join('')}
+      ${ME.settings?.trial ? `<a class="trial ${ME.settings.trial.expired ? 'over' : ''}" href="${isDirector() ? '#/company' : '#/dashboard'}">${ME.settings.trial.expired ? 'Trial ended' : `Trial · ${ME.settings.trial.days_left} day${ME.settings.trial.days_left === 1 ? '' : 's'} left`}</a>` : ''}
       <div class="who">Signed in as<br><b>${esc(ME.user.name)}</b><br>${ME.user.is_platform_admin && ME.company ? `<button id="leaveCo">Leave ${esc(ME.company.short_name || 'company')}</button> · ` : ''}<button id="logout">Sign out</button></div>
     </nav>
     <main>${content}</main></div>`;
@@ -94,15 +95,45 @@ const header = (eyebrow, title, sub, actions = '') => `<header class="ph"><div c
 const kpi = (l, v, d, cls = '') => `<div class="card kpi"><div class="l">${l}</div><div class="v ${cls}">${v}</div><div class="d">${d || ''}</div></div>`;
 
 // ---------- views ----------
+let CONFIG = null;
+async function config() { if (!CONFIG) CONFIG = await api('/api/config').catch(() => ({ demo: false, signup: true, trial_days: 30 })); return CONFIG; }
+
 async function viewLogin(err) {
+  const cfg = await config();
   app.innerHTML = `<div class="login ${err ? 'quick' : ''}"><div class="hero"><div class="wm">RōSK</div><div class="rb"></div><div class="sl">Controls for Projects</div></div>
     <section class="panel"><form class="lbox" id="loginForm">
       <label class="f">Work email<input class="in" name="email" type="email" autocomplete="username" required placeholder="you@company.com"></label>
       <label class="f">Password<input class="in" name="password" type="password" autocomplete="current-password" required></label>
       ${err ? `<div class="err">${esc(err)}</div>` : ''}
-      <button class="btn p" type="submit">Sign in</button></form>
-      <details class="demo"><summary>Demo accounts</summary><p><b>admin@rosk.app</b> (RōSK platform) · director@premiersg.com.au (directors) · jayden.brown@premiersg.com.au (VIC Branch Manager) · wade.kneale@premiersg.com.au (PM) · marcus.delaney@harbourlinehydraulics.com.au (small customer) — ask for the demo password.</p></details></section></div>`;
+      <button class="btn p" type="submit">Sign in</button>
+      ${cfg.signup ? `<div class="small muted" style="text-align:center">New company? <a href="#/signup">Start a ${cfg.trial_days}-day free trial</a></div>` : ''}</form>
+      ${cfg.demo ? `<details class="demo"><summary>Demo accounts on this instance</summary><p><b>admin@rosk.app</b> (RōSK platform) · director@premiersg.com.au (directors) · jayden.brown@premiersg.com.au (VIC Branch Manager) · wade.kneale@premiersg.com.au (PM) · marcus.delaney@harbourlinehydraulics.com.au (small customer) — ask for the demo password.</p></details>` : ''}</section></div>`;
   $('#loginForm').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/auth/login', { method: 'POST', body: formVals(e.target) }); ME = await api('/api/me'); _go(ME.user.is_platform_admin && !ME.company ? '#/platform' : '#/branch'); } catch (er) { viewLogin(er.message); } };
+}
+
+// Self-service sign-up: company, first branch, first admin. Lands in an empty tenant with the setup checklist.
+async function viewSignup(err) {
+  const cfg = await config();
+  if (!cfg.signup) return viewLogin('Sign-up is closed on this instance');
+  const v = viewSignup._vals || {};
+  const COUNTRIES = [['AU', 'Australia'], ['NZ', 'New Zealand'], ['SG', 'Singapore'], ['JP', 'Japan'], ['AE', 'United Arab Emirates'], ['GB', 'United Kingdom'], ['US', 'United States']];
+  app.innerHTML = `<div class="login quick"><div class="hero"><div class="wm">RōSK</div><div class="rb"></div><div class="sl">Start your ${cfg.trial_days}-day free trial</div></div>
+    <section class="panel"><form class="lbox wide" id="su">
+      <div class="form" style="grid-template-columns:1fr 1fr">
+        <label class="f full">Company name<input class="in" name="company_name" required value="${esc(v.company_name || '')}" placeholder="Northline Services Pty Ltd"></label>
+        <label class="f">Country<select class="in" name="country">${COUNTRIES.map(([c, n]) => `<option value="${c}" ${(v.country || 'AU') === c ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label class="f">Disciplines you work in<input class="in" name="disciplines" value="${esc(v.disciplines || 'Fire, Mechanical, Electrical, Hydraulic')}" placeholder="Fire, Mechanical, Electrical"></label>
+        <label class="f">First branch code<input class="in" name="branch_code" value="${esc(v.branch_code || '')}" placeholder="VIC" maxlength="5" style="text-transform:uppercase"></label>
+        <label class="f">First branch name<input class="in" name="branch_name" value="${esc(v.branch_name || '')}" placeholder="Victoria"></label>
+        <label class="f">Your name<input class="in" name="name" required value="${esc(v.name || '')}" autocomplete="name"></label>
+        <label class="f">Work email<input class="in" name="email" type="email" required value="${esc(v.email || '')}" autocomplete="username"></label>
+        <label class="f full">Password <span class="muted">(10+ characters)</span><input class="in" name="password" type="password" minlength="10" required autocomplete="new-password"></label>
+      </div>
+      ${err ? `<div class="err">${esc(err)}</div>` : ''}
+      <button class="btn p" type="submit">Create my company</button>
+      <div class="small muted" style="text-align:center">You'll be the first admin. Add branches, people and rates once you're in. Already have a login? <a href="#/login">Sign in</a></div>
+    </form></section></div>`;
+  $('#su').onsubmit = async (e) => { e.preventDefault(); const vals = formVals(e.target); viewSignup._vals = vals; try { await api('/api/signup', { method: 'POST', body: vals }); ME = await api('/api/me'); viewSignup._vals = null; _go('#/branch'); } catch (er) { viewSignup(er.message); } };
 }
 
 async function viewBranch() {
@@ -127,6 +158,7 @@ async function viewBranch() {
 
 async function viewDashboard() {
   const d = await api('/api/dashboard'); const t = d.totals;
+  if (!d.projects.length && (isBM() || isDirector())) { const co = await api('/api/company').catch(() => null); if (co && !co.setup.projects) return viewSetup(co); }
   const att = ['supervisor', 'pm', 'branch_manager', 'finance', 'group_admin'].includes(ME.role) ? await api('/api/attendance').catch(() => null) : null;
   const marginCls = t.forecast_margin_pct == null ? '' : t.forecast_margin_pct < 0.1 ? 'bad' : t.forecast_margin_pct < 0.14 ? 'warn' : '';
   shell('#/dashboard', header(`${esc(ME.current_branch.name)} · ${d.projects.length} live job${d.projects.length === 1 ? '' : 's'}${isBM() ? '' : ' you have access to'}`, 'Dashboard', `Live roll-up of ${isBM() ? 'the branch' : 'your jobs'}. Cost figures sync from your accounting system; editable per job until that's connected.`,
@@ -406,6 +438,41 @@ async function viewSettings() {
   $('#sf').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/branch', { method: 'PATCH', body: formVals(e.target) }); ME = await api('/api/me'); toast('Saved'); } catch (er) { toast(er.message, true); } };
 }
 
+function setupSteps(co) {
+  const s = co.setup; const set = co.settings;
+  return [
+    { done: true, title: 'Company created', text: `${esc(co.name)} · ${esc(set.plan_label)}${set.trial ? ` · trial ends ${dt(set.trial.ends_at)}` : ''}`, link: '#/company', cta: 'Company settings' },
+    { done: set.disciplines.length > 0, title: 'Disciplines and trades', text: `${set.disciplines.join(' · ')}. Change these to match how your business categorises jobs and people.`, link: '#/company', cta: 'Edit' },
+    { done: s.branches > 1, title: 'Branches', text: `${s.branches} branch${s.branches === 1 ? '' : 'es'}. One per state, region or country — each with its own currency, GST and response-day rules.`, link: '#/settings', cta: 'Branch settings' },
+    { done: s.rates > 0, title: 'Wage rates', text: 'Load your EBA, award or private rates per trade and classification so timesheets cost themselves.', link: '#/staff', cta: 'Staff & rates' },
+    { done: s.users > 1, title: 'Invite your people', text: 'Project managers, supervisors, estimators, finance and field staff — each sees only the jobs they are granted.', link: '#/users', cta: 'Users & permissions' },
+    { done: s.projects > 0, title: 'Add your first job', text: 'Contract value, retention, claim day and tender margin. Variations, claims and WIP build from here.', link: '#/projects/new', cta: 'New project' },
+    { done: s.onboarding > 0, title: 'Onboarding QR (optional)', text: 'A printable QR code for new starters: welcome page, timesheet instructions, uniform link.', link: '#/onboarding', cta: 'Set up' },
+  ];
+}
+async function viewSetup(co) {
+  const steps = setupSteps(co); const done = steps.filter(s => s.done).length;
+  shell('#/dashboard', header(esc(co.name), 'Welcome to RōSK', `${done} of ${steps.length} setup steps done. Your dashboard appears as soon as the first job is in.`) +
+    `<section class="card" style="max-width:820px"><div class="ch"><h2>Get set up</h2><span class="small muted">${done}/${steps.length}</span></div>
+      ${steps.map((s, i) => `<div style="display:flex;gap:14px;padding:14px 16px;border-bottom:1px solid var(--line2);align-items:flex-start"><span class="av" style="background:${s.done ? 'var(--ok)' : 'var(--line)'};color:${s.done ? '#fff' : 'var(--muted)'}">${s.done ? '✓' : i + 1}</span><div style="flex:1"><b>${s.title}</b><div class="small muted" style="margin-top:2px">${s.text}</div></div><a class="btn s" href="${s.link}">${s.cta}</a></div>`).join('')}
+    </section>`);
+}
+async function viewCompany() {
+  const co = await api('/api/company'); const set = co.settings; const steps = setupSteps(co);
+  const canEdit = isDirector() || ME.user.is_platform_admin;
+  shell('#/company', header(esc(co.name), 'Company settings', 'How this business is described inside RōSK. These apply to every branch.') +
+    `<div class="row"><form class="card pad form col2" id="cf" style="max-width:760px">
+      <label>Company name<input class="in" name="name" value="${esc(co.name)}" ${canEdit ? '' : 'disabled'}></label><label>Short name<input class="in" name="short_name" value="${esc(co.short_name || '')}" ${canEdit ? '' : 'disabled'}></label>
+      <label class="full">Disciplines <span class="muted">(comma-separated — how jobs and variations are categorised)</span><input class="in" name="disciplines" value="${esc(set.disciplines.join(', '))}" ${canEdit ? '' : 'disabled'}></label>
+      <label class="full">Trades <span class="muted">(comma-separated — how people and wage rates are grouped)</span><input class="in" name="trades" value="${esc(set.trades.join(', '))}" ${canEdit ? '' : 'disabled'}></label>
+      <label>Accounting system<input class="in" name="accounting" value="${esc(co.accounting || '')}" placeholder="Xero / MYOB / Sage / Jobpac" ${canEdit ? '' : 'disabled'}></label><label>Country<input class="in" value="${esc(co.country)}" disabled></label>
+      ${canEdit ? '<div class="full actions"><button class="btn p">Save</button></div>' : ''}</form>
+    <aside class="col1"><section class="card pad"><div class="eyebrow">Plan</div><div style="font-size:22px;font-weight:700;margin-top:4px">${esc(set.plan_label)}</div>
+      ${set.trial ? `<div class="${set.trial.expired ? 'neg' : 'muted'}" style="margin-top:4px">${set.trial.expired ? `Trial ended ${dt(set.trial.ends_at)}.` : `Trial ends ${dt(set.trial.ends_at)} · ${set.trial.days_left} days left.`}</div><div class="small muted" style="margin-top:10px">Billing opens in RōSK soon. Until then, email hello@rosk.app to move to a paid plan.</div>` : '<div class="small muted" style="margin-top:8px">Billing opens in RōSK soon.</div>'}
+      <div class="sep" style="margin:14px 0"></div><div class="eyebrow">Setup</div>${steps.map(s => `<div class="small" style="margin-top:6px"><span class="${s.done ? 'pos' : 'muted'}">${s.done ? '✓' : '○'}</span> ${s.title}</div>`).join('')}</section></aside></div>`);
+  if (canEdit) $('#cf').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/company', { method: 'PATCH', body: formVals(e.target) }); ME = await api('/api/me'); toast('Saved'); viewCompany(); } catch (er) { toast(er.message, true); } };
+}
+
 async function viewAudit() {
   const rows = await api('/api/audit?limit=200');
   shell('#/audit', header(ME.current_branch ? esc(ME.current_branch.name) : esc(ME.company?.name || 'Company'), 'Audit log', 'Every sign-in, branch switch, grant, approval and edit — who, when, and in which branch.') +
@@ -612,13 +679,14 @@ async function route() {
   const seg = pathPart.split('/').filter(Boolean);
   try {
     if (!ME) { try { ME = await api('/api/me'); } catch { ME = null; } }
-    if (!ME) return viewLogin();
+    if (!ME) return seg[0] === 'signup' ? viewSignup() : viewLogin();
     if (seg[0] === 'login') return viewLogin();
+    if (seg[0] === 'signup') return viewSignup();
     if (seg[0] === 'branch') return viewBranch();
     if (seg[0] === 'platform') return viewPlatform();
     if (ME.user.is_platform_admin && !ME.company) return viewPlatform();
     if (!ME.current_branch && !(ME.role === 'group_admin')) return viewBranch();
-    if (!ME.current_branch) { if (seg[0] === 'audit') return viewAudit(); if (seg[0] === 'insights') return seg[1] === 'discipline' ? viewInsightsDiscipline() : seg[1] === 'wip' ? viewInsightsWip() : viewInsightsPm(); if (seg[0] === 'staff') return viewStaff(q); if (seg[0] === 'onboarding') return viewOnboarding(); return viewGroup(); }
+    if (!ME.current_branch) { if (seg[0] === 'audit') return viewAudit(); if (seg[0] === 'company') return viewCompany(); if (seg[0] === 'insights') return seg[1] === 'discipline' ? viewInsightsDiscipline() : seg[1] === 'wip' ? viewInsightsWip() : viewInsightsPm(); if (seg[0] === 'staff') return viewStaff(q); if (seg[0] === 'onboarding') return viewOnboarding(); return viewGroup(); }
     if (ME.role === 'field' && !['timesheet', 'projects', 'branch', 'login'].includes(seg[0])) { location.hash = '#/timesheet'; return; }
     switch (seg[0]) {
       case 'dashboard': return viewDashboard();
@@ -632,6 +700,7 @@ async function route() {
       case 'claims': return viewClaims(q);
       case 'users': return viewUsers(q);
       case 'settings': return viewSettings();
+      case 'company': return viewCompany();
       case 'audit': return viewAudit();
       case 'group': return viewGroup();
       case 'insights': return seg[1] === 'discipline' ? viewInsightsDiscipline() : seg[1] === 'wip' ? viewInsightsWip() : viewInsightsPm();

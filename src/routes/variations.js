@@ -20,7 +20,7 @@ function withDerived(v) {
 }
 
 module.exports = (r) => {
-  r.get('/api/meta/variations', (ctx) => ({ sources: SOURCES, disciplines: DISCIPLINES, transitions: TRANSITIONS }));
+  r.get('/api/meta/variations', (ctx) => ({ sources: SOURCES, disciplines: ctx.company ? require('../company').settings(ctx.company).disciplines : DISCIPLINES, transitions: TRANSITIONS }));
 
   // Register across all visible projects (branch register) or one project (?project_id=)
   r.get('/api/variations', A.requireBranch, (ctx) => {

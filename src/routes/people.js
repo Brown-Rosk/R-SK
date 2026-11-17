@@ -64,7 +64,7 @@ function syncLabour(db, projectId) {
 }
 
 module.exports = (r) => {
-  r.get('/api/meta/people', () => ({ trades: TRADES, employment: EMPLOYMENT }));
+  r.get('/api/meta/people', (ctx) => ({ trades: ctx.company ? require('../company').settings(ctx.company).trades : TRADES, employment: EMPLOYMENT }));
 
   // ---- staff (company-wide list for BM/finance/directors; employment fields) ----
   r.get('/api/staff', A.requireUser, (ctx) => {

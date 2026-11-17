@@ -13,13 +13,13 @@ const { createServer } = require('../src/http');
 const { seed } = require('../scripts/seed');
 
 let server, base;
-const login = async (email) => {
-  const r = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'psg2026' }) });
+const login = async (email, password = 'psg2026') => {
+  const r = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
   assert.equal(r.status, 200);
   return r.headers.get('set-cookie').split(';')[0];
 };
 const call = async (cookie, p, method = 'GET', body) => {
-  const r = await fetch(base + p, { method, headers: { 'content-type': 'application/json', cookie }, body: body ? JSON.stringify(body) : undefined });
+  const r = await fetch(base + p, { method, headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: body ? JSON.stringify(body) : undefined });
   return { status: r.status, body: await r.json().catch(() => ({})) };
 };
 const enter = (cookie, branch_id) => call(cookie, '/api/auth/branch', 'POST', { branch_id });
@@ -235,4 +235,18 @@ test('toolbox talks: supervisors record on their jobs; onboarding page is public
   const o = (await call(jb, '/api/onboarding')).body; assert.ok(o.qr_svg.startsWith('<svg'));
   const pub = await fetch(base + '/onboard/' + o.token); assert.equal(pub.status, 200); assert.ok((await pub.text()).includes('Welcome to Premier Services Group'));
   assert.equal((await fetch(base + '/onboard/nope')).status, 404);
+});
+
+test('self-service sign-up: new tenant is isolated, on trial, with its own disciplines', async () => {
+  const r = await call(null, '/api/signup', 'POST', { company_name: 'Test Co', country: 'NZ', branch_code: 'AKL', branch_name: 'Auckland', name: 'Ann Lee', email: 'ann@testco.example', password: 'long-enough-pw', disciplines: 'Fire, Comms' });
+  assert.equal(r.status, 201);
+  const ann = await login('ann@testco.example', 'long-enough-pw'); const me = (await call(ann, '/api/me')).body;
+  assert.equal(me.company.plan, 'trial'); assert.deepEqual(me.settings.disciplines, ['Fire', 'Comms']); assert.equal(me.branches.length, 1); assert.equal(me.branches[0].code, 'AKL');
+  await enter(ann, me.branches[0].id);
+  assert.equal((await call(ann, '/api/projects')).body.length, 0);                      // sees nothing of PSG
+  assert.equal((await call(ann, '/api/projects/1')).status, 404);                      // PSG job hidden, not forbidden
+  assert.equal((await call(null, '/api/signup', 'POST', { company_name: 'Dup', name: 'X Y', email: 'ann@testco.example', password: 'long-enough-pw' })).status, 409);
+  const co = (await call(ann, '/api/company')).body; assert.equal(co.setup.projects, 0); assert.equal(co.setup.users, 1);
+  assert.equal((await call(ann, '/api/company', 'PATCH', { disciplines: 'Fire, Comms, Security' })).status, 200);
+  assert.equal((await call(ann, '/api/meta/variations')).body.disciplines.length, 3);
 });

@@ -151,6 +151,17 @@ function migrate(d) {
   // Guard against a database created by an older build.
   const cols = d.prepare("PRAGMA table_info('branches')").all().map(c => c.name);
   if (!cols.includes('company_id')) throw new Error('This database was created by an older version of RōSK. Delete the data folder (or set PSG_DB to a new path) and start again.');
+  // Additive migrations (safe to re-run): columns added after the first release.
+  ensureColumn(d, 'companies', 'disciplines', 'TEXT');      // JSON array of labels, e.g. ["Fire","Mechanical"]
+  ensureColumn(d, 'companies', 'trade_list', 'TEXT');       // JSON array of labels for staff/rates
+  ensureColumn(d, 'companies', 'trial_ends_at', 'TEXT');
+  ensureColumn(d, 'companies', 'signup_source', 'TEXT');
+  ensureColumn(d, 'branches', 'timezone', 'TEXT');
+}
+
+function ensureColumn(d, table, col, def) {
+  const have = d.prepare(`PRAGMA table_info('${table}')`).all().map(c => c.name);
+  if (!have.includes(col)) d.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
 }
 
 module.exports = { open, DB_PATH };

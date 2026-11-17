@@ -4,8 +4,8 @@ const { HttpError } = require('../http');
 const A = require('../auth');
 const { projectSummary } = require('./projects');
 
-const DISCIPLINES = ['fire', 'mechanical', 'electrical', 'hydraulic'];
-const DISC_LABEL = { fire: 'Fire', mechanical: 'Mechanical', electrical: 'Electrical', hydraulic: 'Hydraulic' };
+const Co = require('../company');
+function disciplinesOf(ctx) { const s = Co.settings(ctx.company); return s.disciplines.map(l => ({ key: Co.keyOf(l), label: l })); }
 
 // WIP for one project. Percentage of completion on cost: earned = contract * (actual / forecast).
 function wipFor(db, p) {
@@ -48,7 +48,7 @@ function roll(rows) {
 }
 
 module.exports = (r) => {
-  r.get('/api/meta/disciplines', () => DISCIPLINES.map(d => ({ key: d, label: DISC_LABEL[d] })));
+  r.get('/api/meta/disciplines', (ctx) => { A.requireUser(ctx); return disciplinesOf(ctx); });
 
   // Everything, with WIP per project — the base for the three views.
   const load = (ctx) => { A.requireUser(ctx); if (!ctx.company) throw new HttpError(403, 'Choose a company first'); return scopeProjects(ctx).map(p => ({ ...p, wip: wipFor(ctx.db, p) })); };
@@ -66,8 +66,9 @@ module.exports = (r) => {
   // 2. Performance by discipline (fire / mechanical / electrical / hydraulic), with per-branch split inside each
   r.get('/api/insights/by-discipline', (ctx) => {
     const rows = load(ctx);
-    const out = DISCIPLINES.map(d => { const ps = rows.filter(p => p.discipline === d); const byBranch = {}; ps.forEach(p => { (byBranch[p.branch_code] = byBranch[p.branch_code] || []).push(p); });
-      return { discipline: d, label: DISC_LABEL[d], totals: roll(ps), branches: Object.entries(byBranch).map(([code, bp]) => ({ branch_code: code, totals: roll(bp) })).sort((a, b) => b.totals.contract - a.totals.contract),
+    const known = disciplinesOf(ctx); const keys = known.map(d => d.key); const extra = [...new Set(rows.map(p => p.discipline).filter(d => d && !keys.includes(d)))];
+    const out = [...known, ...extra.map(k => ({ key: k, label: k[0].toUpperCase() + k.slice(1) }))].map(({ key: d, label }) => { const ps = rows.filter(p => p.discipline === d); const byBranch = {}; ps.forEach(p => { (byBranch[p.branch_code] = byBranch[p.branch_code] || []).push(p); });
+      return { discipline: d, label, totals: roll(ps), branches: Object.entries(byBranch).map(([code, bp]) => ({ branch_code: code, totals: roll(bp) })).sort((a, b) => b.totals.contract - a.totals.contract),
         projects: ps.map(p => ({ id: p.id, number: p.number, name: p.name, branch_code: p.branch_code, pm: p.lead_pm_name, contract: p.wip.contract_total, forecast_margin_pct: p.wip.forecast_margin_pct, tender_margin_pct: p.tender_margin_pct, wip: p.wip.wip })) }; }).filter(d => d.totals.jobs > 0);
     return { disciplines: out, totals: roll(rows) };
   });
@@ -83,10 +84,9 @@ module.exports = (r) => {
 
   r.patch('/api/projects/:id/discipline', A.requireBranch, (ctx) => {
     const p = A.loadProject(ctx, ctx.params.id); A.requireWrite(ctx, p);
-    if (!DISCIPLINES.includes(ctx.body.discipline)) throw new HttpError(400, 'Invalid discipline');
+    if (!disciplinesOf(ctx).some(d => d.key === ctx.body.discipline)) throw new HttpError(400, 'Invalid discipline');
     ctx.db.prepare('UPDATE projects SET discipline = ? WHERE id = ?').run(ctx.body.discipline, p.id);
     return { ok: true };
   });
 };
 module.exports.wipFor = wipFor;
-module.exports.DISCIPLINES = DISCIPLINES;

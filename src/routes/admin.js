@@ -1,6 +1,7 @@
 'use strict';
 const { HttpError } = require('../http');
 const A = require('../auth');
+const Co = require('../company');
 const { projectSummary } = require('./projects');
 
 const MANAGE = A.requireRole('branch_manager');
@@ -153,6 +154,36 @@ module.exports = (r) => {
     return { id: u.id, temp_password: temp };
   });
 
+  // ---- Company settings (directors / company admins): the lists that describe this business ----
+  r.get('/api/company', (ctx) => { A.requireUser(ctx); if (!ctx.company) throw new HttpError(403, 'Choose a company first'); return { ...ctx.company, settings: Co.settings(ctx.company), setup: setupStatus(ctx) }; });
+  r.patch('/api/company', (ctx) => {
+    A.requireUser(ctx); if (!ctx.company) throw new HttpError(403, 'Choose a company first');
+    if (!ctx.user.is_group_admin && !ctx.user.is_platform_admin) throw new HttpError(403, 'Company settings are for company admins');
+    const b = ctx.body; const sets = []; const vals = [];
+    if ('name' in b) { const n = String(b.name).trim(); if (n.length < 2) throw new HttpError(400, 'Name required'); sets.push('name = ?'); vals.push(n); }
+    if ('short_name' in b) { sets.push('short_name = ?'); vals.push(String(b.short_name || '').trim() || null); }
+    if ('accounting' in b) { sets.push('accounting = ?'); vals.push(String(b.accounting || '').trim() || null); }
+    if ('disciplines' in b) { const d = Co.cleanList(b.disciplines, Co.DEFAULT_DISCIPLINES); sets.push('disciplines = ?'); vals.push(JSON.stringify(d)); sets.push('trades = ?'); vals.push(d.join(' · ')); }
+    if ('trades' in b) { sets.push('trade_list = ?'); vals.push(JSON.stringify(Co.cleanList(b.trades, Co.DEFAULT_TRADES))); }
+    if (!sets.length) throw new HttpError(400, 'Nothing to update');
+    ctx.db.prepare(`UPDATE companies SET ${sets.join(', ')} WHERE id = ?`).run(...vals, ctx.company.id);
+    A.audit(ctx, 'company.settings', 'company', ctx.company.id, b);
+    return { ok: true };
+  });
+  // Setup checklist for a new tenant — what's been done, what hasn't.
+  function setupStatus(ctx) {
+    const cid = ctx.company.id; const q = (sql, ...a) => ctx.db.prepare(sql).get(...a).n;
+    return {
+      branches: q('SELECT COUNT(*) n FROM branches WHERE company_id = ?', cid),
+      users: q('SELECT COUNT(*) n FROM users WHERE company_id = ? AND active = 1', cid),
+      rates: q('SELECT COUNT(*) n FROM wage_rates WHERE company_id = ?', cid),
+      projects: q('SELECT COUNT(*) n FROM projects p JOIN branches b ON b.id = p.branch_id WHERE b.company_id = ?', cid),
+      live_projects: q("SELECT COUNT(*) n FROM projects p JOIN branches b ON b.id = p.branch_id WHERE b.company_id = ? AND p.status = 'live'", cid),
+      field_staff: q("SELECT COUNT(*) n FROM users u JOIN branch_members bm ON bm.user_id = u.id WHERE u.company_id = ? AND bm.role = 'field'", cid),
+      onboarding: q('SELECT COUNT(*) n FROM onboarding WHERE company_id = ?', cid),
+    };
+  }
+
   // ---- RōSK platform (multi-tenant) ----
   r.get('/api/platform/companies', A.requirePlatformAdmin, (ctx) => {
     return ctx.db.prepare(`SELECT c.*, (SELECT COUNT(*) FROM branches b WHERE b.company_id = c.id) branches,
@@ -166,7 +197,7 @@ module.exports = (r) => {
     const b = ctx.body;
     if (!b.name) throw new HttpError(400, 'name required');
     const info = ctx.db.prepare('INSERT INTO companies (name, short_name, trades, plan, country, accounting) VALUES (?,?,?,?,?,?)')
-      .run(b.name, b.short_name || null, b.trades || null, b.plan || 'pilot', b.country || 'AU', b.accounting || null);
+      .run(b.name, b.short_name || null, b.trades || null, b.plan || 'standard', b.country || 'AU', b.accounting || null);
     const cid = Number(info.lastInsertRowid);
     if (b.first_branch_code) ctx.db.prepare('INSERT INTO branches (company_id, code, name, country, currency, gst_rate, status) VALUES (?,?,?,?,?,?,?)')
       .run(cid, b.first_branch_code.toUpperCase(), b.first_branch_name || b.first_branch_code, b.country || 'AU', b.country === 'NZ' ? 'NZD' : 'AUD', b.country === 'NZ' ? 0.15 : 0.10, 'live');

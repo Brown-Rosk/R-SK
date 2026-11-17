@@ -109,3 +109,5 @@ textarea.in{height:auto;padding:10px 12px;min-height:80px;resize:vertical}
 .br.dis .tg{background:#E5E7EB;color:var(--muted)}.br b{display:block;font-size:14px}.br small{font-size:12px;color:var(--muted)}
 .err{color:var(--bad);font-size:13px}
 @media (max-width:760px){main{padding:16px}nav.side{flex-basis:100%;flex-direction:row;flex-wrap:wrap;padding:10px}.who{margin-top:0;flex-basis:100%}.form,.branches{grid-template-columns:1fr}}
+
+.trial{display:block;margin:6px 10px 0;padding:6px 10px;border-radius:4px;background:#FFF4D6;color:#7A5415;font-size:12px;font-weight:600;text-align:center}.trial.over{background:var(--badbg);color:var(--badtx)}

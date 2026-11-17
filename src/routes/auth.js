@@ -1,8 +1,43 @@
 'use strict';
 const { HttpError } = require('../http');
 const A = require('../auth');
+const Co = require('../company');
+const TZ = require('../tz');
 
 module.exports = (r) => {
+  // Public: what the sign-in page needs to know about this instance.
+  r.get('/api/config', (ctx) => ({ demo: (process.env.ROSK_SEED || 'demo') === 'demo', signup: process.env.ROSK_SIGNUP !== 'off', trial_days: Co.TRIAL_DAYS, brand: 'RōSK' }));
+
+  // Self-service sign-up: a new company, its first branch and its first admin, on a 30-day trial. Signed in on success.
+  r.post('/api/signup', (ctx) => {
+    if (process.env.ROSK_SIGNUP === 'off') throw new HttpError(403, 'Sign-up is closed on this instance');
+    const b = ctx.body || {};
+    const name = String(b.company_name || '').trim(), person = String(b.name || '').trim(), email = String(b.email || '').trim().toLowerCase(), pw = String(b.password || '');
+    if (name.length < 2) throw new HttpError(400, 'Company name required');
+    if (person.length < 2) throw new HttpError(400, 'Your name is required');
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'A valid work email is required');
+    if (pw.length < 10) throw new HttpError(400, 'Password must be at least 10 characters');
+    if (ctx.db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) throw new HttpError(409, 'That email already has a RōSK login — sign in instead');
+    const country = ['AU', 'NZ', 'SG', 'JP', 'AE', 'GB', 'US'].includes(b.country) ? b.country : 'AU';
+    const CUR = { AU: ['AUD', 0.10], NZ: ['NZD', 0.15], SG: ['SGD', 0.09], JP: ['JPY', 0.10], AE: ['AED', 0.05], GB: ['GBP', 0.20], US: ['USD', 0] };
+    const code = String(b.branch_code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5) || (country === 'AU' ? 'VIC' : country);
+    const branchName = String(b.branch_name || '').trim() || (country === 'AU' ? 'Head office' : country);
+    const ends = new Date(Date.now() + Co.TRIAL_DAYS * 86400000).toISOString().slice(0, 10);
+    const disciplines = Co.cleanList(b.disciplines, Co.DEFAULT_DISCIPLINES);
+    const tx = ctx.db;
+    const cid = Number(tx.prepare('INSERT INTO companies (name, short_name, trades, plan, country, accounting, disciplines, trade_list, trial_ends_at, signup_source) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(name, String(b.short_name || '').trim() || name.split(/\s+/).slice(0, 2).join(' '), disciplines.join(' · '), 'trial', country, String(b.accounting || '').trim() || null, JSON.stringify(disciplines), JSON.stringify(Co.cleanList(b.trades, [...disciplines, 'Office'])), ends, 'self-service').lastInsertRowid);
+    const bid = Number(tx.prepare('INSERT INTO branches (company_id, code, name, country, currency, gst_rate, status, job_prefix, timezone) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(cid, code, branchName, country, CUR[country][0], CUR[country][1], 'live', code, b.timezone || null).lastInsertRowid);
+    const initials = person.split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase();
+    const uid = Number(tx.prepare('INSERT INTO users (company_id, email, name, initials, password_hash, is_group_admin, employment_type, home_branch_id) VALUES (?,?,?,?,?,1,?,?)').run(cid, email, person, initials, A.hashPassword(pw), 'salary', bid).lastInsertRowid);
+    tx.prepare('INSERT INTO branch_members (user_id, branch_id, role) VALUES (?,?,?)').run(uid, bid, 'branch_manager');
+    tx.prepare('INSERT INTO audit_log (user_id, action, entity, entity_id, detail) VALUES (?,?,?,?,?)').run(uid, 'company.signup', 'company', cid, JSON.stringify({ name, country, code }));
+    const sid = A.createSession(tx, uid);
+    ctx.res.setHeader('Set-Cookie', `psg_session=${sid}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${12 * 3600}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    ctx.status = 201; return { ok: true, company_id: cid, branch_id: bid, trial_ends_at: ends };
+  });
+
   r.post('/api/auth/login', (ctx) => {
     const { email, password } = ctx.body;
     const u = ctx.db.prepare('SELECT * FROM users WHERE email = ? AND active = 1').get(String(email || ''));
@@ -27,7 +62,7 @@ module.exports = (r) => {
       const m = ctx.memberships.find(x => x.branch_id === b.id);
       return { ...b, role: m ? m.role : (ctx.user.is_group_admin ? 'group_admin' : null) };
     });
-    return { user: ctx.user, company: ctx.company || null, branches, current_branch: ctx.branch || null, role: ctx.role || null };
+    return { user: ctx.user, company: ctx.company || null, settings: Co.settings(ctx.company), branches, current_branch: ctx.branch ? { ...ctx.branch, timezone: TZ.tzFor(ctx.branch) } : null, role: ctx.role || null };
   });
 
   // Platform admin: enter a customer company (acts as a director there). Pass null to leave.
