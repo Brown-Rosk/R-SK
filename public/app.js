@@ -106,19 +106,22 @@ async function viewLogin(err) {
       <label class="f">Password<input class="in" name="password" type="password" autocomplete="current-password" required></label>
       ${err ? `<div class="err">${esc(err)}</div>` : ''}
       <button class="btn p" type="submit">Sign in</button>
-      ${cfg.signup ? `<div class="small muted" style="text-align:center">New company? <a href="#/signup">Start a ${cfg.trial_days}-day free trial</a></div>` : ''}</form>
+      ${cfg.signup === 'open' ? `<div class="small muted" style="text-align:center">New company? <a href="#/signup">Start a ${cfg.trial_days}-day free trial</a></div>` : ''}</form>
       ${cfg.demo ? `<details class="demo"><summary>Demo accounts on this instance</summary><p><b>admin@rosk.app</b> (RōSK platform) · director@premiersg.com.au (directors) · jayden.brown@premiersg.com.au (VIC Branch Manager) · wade.kneale@premiersg.com.au (PM) · marcus.delaney@harbourlinehydraulics.com.au (small customer) — ask for the demo password.</p></details>` : ''}</section></div>`;
   $('#loginForm').onsubmit = async (e) => { e.preventDefault(); try { await api('/api/auth/login', { method: 'POST', body: formVals(e.target) }); ME = await api('/api/me'); _go(ME.user.is_platform_admin && !ME.company ? '#/platform' : '#/branch'); } catch (er) { viewLogin(er.message); } };
 }
 
 // Self-service sign-up: company, first branch, first admin. Lands in an empty tenant with the setup checklist.
-async function viewSignup(err) {
-  const cfg = await config();
-  if (!cfg.signup) return viewLogin('Sign-up is closed on this instance');
+async function viewSignup(err, q = {}) {
+  const code = q.code || viewSignup._code || ''; viewSignup._code = code;
+  const cfg = await api('/api/config' + (code ? `?code=${encodeURIComponent(code)}` : '')).catch(() => ({ signup: 'off' }));
+  if (cfg.signup === 'off' || (cfg.signup === 'invite' && !cfg.invite)) return viewLogin('Trials are by invitation — ask RōSK for an invite link');
+  if (cfg.signup === 'invite' && !cfg.invite.ok) return viewLogin(cfg.invite.error);
+  const trialDays = cfg.invite?.trial_days || cfg.trial_days;
   const v = viewSignup._vals || {};
   const COUNTRIES = [['AU', 'Australia'], ['NZ', 'New Zealand'], ['SG', 'Singapore'], ['JP', 'Japan'], ['AE', 'United Arab Emirates'], ['GB', 'United Kingdom'], ['US', 'United States']];
-  app.innerHTML = `<div class="login quick"><div class="hero"><div class="wm">RōSK</div><div class="rb"></div><div class="sl">Start your ${cfg.trial_days}-day free trial</div></div>
-    <section class="panel"><form class="lbox wide" id="su">
+  app.innerHTML = `<div class="login quick"><div class="hero"><div class="wm">RōSK</div><div class="rb"></div><div class="sl">Start your ${trialDays}-day free trial${cfg.invite?.note ? ` · ${esc(cfg.invite.note)}` : ''}</div></div>
+    <section class="panel"><form class="lbox wide" id="su"><input type="hidden" name="code" value="${esc(code)}">
       <div class="form" style="grid-template-columns:1fr 1fr">
         <label class="f full">Company name<input class="in" name="company_name" required value="${esc(v.company_name || '')}" placeholder="Northline Services Pty Ltd"></label>
         <label class="f">Country<select class="in" name="country">${COUNTRIES.map(([c, n]) => `<option value="${c}" ${(v.country || 'AU') === c ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
@@ -133,7 +136,7 @@ async function viewSignup(err) {
       <button class="btn p" type="submit">Create my company</button>
       <div class="small muted" style="text-align:center">You'll be the first admin. Add branches, people and rates once you're in. Already have a login? <a href="#/login">Sign in</a></div>
     </form></section></div>`;
-  $('#su').onsubmit = async (e) => { e.preventDefault(); const vals = formVals(e.target); viewSignup._vals = vals; try { await api('/api/signup', { method: 'POST', body: vals }); ME = await api('/api/me'); viewSignup._vals = null; _go('#/branch'); } catch (er) { viewSignup(er.message); } };
+  $('#su').onsubmit = async (e) => { e.preventDefault(); const vals = formVals(e.target); viewSignup._vals = vals; try { await api('/api/signup', { method: 'POST', body: vals }); ME = await api('/api/me'); viewSignup._vals = null; _go('#/branch'); } catch (er) { viewSignup(er.message, q); } };
 }
 
 async function viewBranch() {
@@ -658,16 +661,20 @@ async function viewToolbox(q) {
 // ---------- RōSK platform (all companies) ----------
 async function viewPlatform() {
   if (!ME.user.is_platform_admin) { location.hash = '#/dashboard'; return; }
-  const cos = await api('/api/platform/companies');
+  const cos = await api('/api/platform/companies'); const invites = await api('/api/platform/invites').catch(() => []);
   const tot = cos.reduce((t, c) => ({ value: t.value + c.live_value, jobs: t.jobs + c.live_jobs, users: t.users + c.users }), { value: 0, jobs: 0, users: 0 });
-  shell('#/platform', header('RōSK · platform', 'All companies', 'Every customer on RōSK. Each company is fully isolated — entering one gives you a director\'s view inside it.', `<button class="btn p" id="addCo">+ Onboard company</button>`) +
+  shell('#/platform', header('RōSK · platform', 'All companies', 'Every customer on RōSK. Each company is fully isolated — entering one gives you a director\'s view inside it.', `<button class="btn" id="addInv">+ Trial invite</button><button class="btn p" id="addCo">+ Onboard company</button>`) +
     `<div class="kpis">${kpi('Companies', cos.length, cos.filter(c => c.plan === 'enterprise').length + ' enterprise')}${kpi('Live contract value', mK(tot.value), 'across all customers')}${kpi('Live jobs', tot.jobs, '')}${kpi('Users', tot.users, 'active accounts')}</div>
     <section class="card"><div class="ch"><h2>Customers</h2><span class="small muted">Click a company to enter it</span></div><div class="tw"><table><thead><tr><th>Company</th><th>Trades</th><th>Plan</th><th>Accounting</th><th class="c">Branches</th><th class="c">Users</th><th class="n">Live jobs</th><th class="n">Live value</th><th>Last activity</th><th>Status</th></tr></thead><tbody>
     ${cos.map(c => `<tr class="click" data-co="${c.id}"><td><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.short_name || '')} · ${esc(c.country)}</span></td><td>${esc(c.trades || '')}</td><td><span class="pill ${c.plan === 'enterprise' ? 'bad' : 'info'}">${esc(c.plan)}</span></td><td>${esc(c.accounting || '—')}</td><td class="c">${c.branches}</td><td class="c">${c.users}</td><td class="n">${c.live_jobs}</td><td class="n">${mK(c.live_value)}</td><td class="small muted">${dt(c.last_activity)}</td><td><span class="pill ${c.status === 'active' ? 'ok' : 'grey'}">${esc(c.status)}</span></td></tr>`).join('')}</tbody></table></div></section>
+    <section class="card"><div class="ch"><h2>Trial invites</h2><span class="small muted">Send the link to the client. One company per link.</span></div>${invites.length ? `<div class="tw"><table><thead><tr><th>Created</th><th>For</th><th>Trial</th><th>Link</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>${invites.map(i => `<tr><td class="small">${dt(i.created_at)}</td><td>${esc(i.note || '—')}</td><td>${i.trial_days} days${i.plan === 'pilot' ? ' · pilot' : ''}</td><td><code class="small">${location.origin}/#/signup?code=${esc(i.code)}</code> <button class="btn s" data-copy="${location.origin}/#/signup?code=${esc(i.code)}">Copy</button></td><td class="small">${dt(i.expires_at)}</td><td>${i.uses ? `<span class="pill ok">Used · ${esc(i.company_name || '')}</span>` : i.expires_at < new Date().toISOString().slice(0, 10) ? '<span class="pill grey">Expired</span>' : '<span class="pill info">Open</span>'}</td><td>${i.uses ? '' : `<button class="btn s danger" data-del="${esc(i.code)}">Revoke</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No invites yet. Create one and send the client the link.</div>'}</section>
     <div class="grid3"><section class="card pad stack"><h2 style="font-size:15px">What a company gets</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li>Its own branches, users, roles and job grants</li><li>Cost-code and schedule templates per trade</li><li>Accounting integration mapped to its own entities</li><li>Its own audit log — nothing shared between customers</li></ul></section>
     <section class="card pad stack"><h2 style="font-size:15px">Plans</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li><b>Standard</b> — single branch, up to ~25 users</li><li><b>Enterprise</b> — multi-branch, multi-entity, SSO, company-wide roll-up</li><li>Pricing model to be confirmed (per user / per branch / per job value)</li></ul></section>
     <section class="card pad stack"><h2 style="font-size:15px">Platform controls</h2><ul style="margin:0;padding-left:18px;line-height:1.7;font-size:13px"><li>Onboard a company with its first branch and admin</li><li>Enter any company as a director for support</li><li>Every platform action is logged against the admin</li></ul></section></div>`);
   app.querySelectorAll('tr[data-co]').forEach(trw => trw.onclick = async () => { await api('/api/auth/company', { method: 'POST', body: { company_id: +trw.dataset.co } }); ME = await api('/api/me'); location.hash = '#/group'; });
+  app.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Link copied'); } catch { toast(b.dataset.copy); } });
+  app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { await api('/api/platform/invites/' + b.dataset.del, { method: 'DELETE' }); viewPlatform(); });
+  $('#addInv').onclick = () => modal(`<h2>Trial invite</h2><form class="form" id="if"><label class="full">Who is it for? <span class="muted">(shown to them on the sign-up page)</span><input class="in" name="note" placeholder="Harbour City Electrical — Priya"></label><label>Trial length (days)<input class="in" name="trial_days" type="number" value="30" min="1" max="365"></label><label>Link valid until<input class="in" name="expires_at" type="date" value="${new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)}"></label><div class="full actions"><button class="btn p">Create link</button><button class="btn" type="button" data-close>Cancel</button></div></form>`, (m, close) => $('#if', m).onsubmit = async (e) => { e.preventDefault(); try { await api('/api/platform/invites', { method: 'POST', body: formVals(e.target) }); close(); viewPlatform(); } catch (er) { toast(er.message, true); } });
   $('#addCo').onclick = () => modal(`<h2>Onboard a company</h2><form class="form" id="cf"><label class="full">Company name<input class="in" name="name" required></label><label>Short name<input class="in" name="short_name"></label><label>Trades<input class="in" name="trades" placeholder="Fire · Hydraulic"></label><label>Plan<select class="in" name="plan"><option value="standard">Standard</option><option value="enterprise">Enterprise</option><option value="pilot">Pilot</option></select></label><label>Country<select class="in" name="country"><option>AU</option><option>NZ</option></select></label><label>Accounting system<input class="in" name="accounting" placeholder="Xero / MYOB / Sage / Jobpac"></label><label>First branch code<input class="in" name="first_branch_code" placeholder="SYD"></label><label class="full">First branch name<input class="in" name="first_branch_name"></label><label>Admin email<input class="in" name="admin_email" type="email"></label><label>Admin name<input class="in" name="admin_name"></label><div class="full actions"><button class="btn p">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`, (m, close) => $('#cf', m).onsubmit = async (e) => { e.preventDefault(); try { const r = await api('/api/platform/companies', { method: 'POST', body: formVals(e.target) }); toast(r.admin_temp_password ? `Created. Admin temp password: ${r.admin_temp_password}` : 'Created'); close(); viewPlatform(); } catch (er) { toast(er.message, true); } });
 }
 
@@ -679,9 +686,9 @@ async function route() {
   const seg = pathPart.split('/').filter(Boolean);
   try {
     if (!ME) { try { ME = await api('/api/me'); } catch { ME = null; } }
-    if (!ME) return seg[0] === 'signup' ? viewSignup() : viewLogin();
+    if (!ME) return seg[0] === 'signup' ? viewSignup(null, q) : viewLogin();
     if (seg[0] === 'login') return viewLogin();
-    if (seg[0] === 'signup') return viewSignup();
+    if (seg[0] === 'signup') return viewSignup(null, q);
     if (seg[0] === 'branch') return viewBranch();
     if (seg[0] === 'platform') return viewPlatform();
     if (ME.user.is_platform_admin && !ME.company) return viewPlatform();

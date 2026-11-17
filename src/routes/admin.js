@@ -184,6 +184,18 @@ module.exports = (r) => {
     };
   }
 
+  // ---- Trial invites: the platform admin hands a client a link; it creates one company, once ----
+  r.get('/api/platform/invites', A.requirePlatformAdmin, (ctx) => ctx.db.prepare(`SELECT i.*, c.name company_name, u.name created_by_name FROM signup_invites i LEFT JOIN companies c ON c.id = i.used_by_company_id LEFT JOIN users u ON u.id = i.created_by ORDER BY i.id DESC`).all());
+  r.post('/api/platform/invites', A.requirePlatformAdmin, (ctx) => {
+    const b = ctx.body || {}; const code = require('node:crypto').randomBytes(9).toString('base64url');
+    const days = Math.min(365, Math.max(1, Number(b.trial_days) || Co.TRIAL_DAYS));
+    const expires = b.expires_at || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    ctx.db.prepare('INSERT INTO signup_invites (code, note, trial_days, plan, max_uses, expires_at, created_by) VALUES (?,?,?,?,?,?,?)').run(code, String(b.note || '').trim() || null, days, b.plan === 'pilot' ? 'pilot' : 'trial', 1, expires, ctx.user.id);
+    A.audit(ctx, 'platform.invite', 'invite', code, { note: b.note, trial_days: days });
+    ctx.status = 201; return { code, trial_days: days, expires_at: expires };
+  });
+  r.delete('/api/platform/invites/:code', A.requirePlatformAdmin, (ctx) => { ctx.db.prepare('DELETE FROM signup_invites WHERE code = ? AND uses = 0').run(ctx.params.code); return { ok: true }; });
+
   // ---- RōSK platform (multi-tenant) ----
   r.get('/api/platform/companies', A.requirePlatformAdmin, (ctx) => {
     return ctx.db.prepare(`SELECT c.*, (SELECT COUNT(*) FROM branches b WHERE b.company_id = c.id) branches,

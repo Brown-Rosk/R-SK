@@ -237,15 +237,22 @@ test('toolbox talks: supervisors record on their jobs; onboarding page is public
   assert.equal((await fetch(base + '/onboard/nope')).status, 404);
 });
 
-test('self-service sign-up: new tenant is isolated, on trial, with its own disciplines', async () => {
-  const r = await call(null, '/api/signup', 'POST', { company_name: 'Test Co', country: 'NZ', branch_code: 'AKL', branch_name: 'Auckland', name: 'Ann Lee', email: 'ann@testco.example', password: 'long-enough-pw', disciplines: 'Fire, Comms' });
+test('invite-only sign-up: new tenant is isolated, on trial, with its own disciplines', async () => {
+  const form = { company_name: 'Test Co', country: 'NZ', branch_code: 'AKL', branch_name: 'Auckland', name: 'Ann Lee', email: 'ann@testco.example', password: 'long-enough-pw', disciplines: 'Fire, Comms' };
+  assert.equal((await call(null, '/api/signup', 'POST', form)).status, 403);                       // no invite, no trial
+  const admin = await login('admin@rosk.app');
+  const inv = (await call(admin, '/api/platform/invites', 'POST', { note: 'Test Co', trial_days: 14 })).body; assert.ok(inv.code);
+  assert.equal((await call(null, '/api/signup', 'POST', { ...form, code: 'nope' })).status, 404);
+  const r = await call(null, '/api/signup', 'POST', { ...form, code: inv.code });
   assert.equal(r.status, 201);
+  assert.equal((await call(null, '/api/signup', 'POST', { ...form, email: 'other@testco.example', code: inv.code })).status, 410); // one use
   const ann = await login('ann@testco.example', 'long-enough-pw'); const me = (await call(ann, '/api/me')).body;
   assert.equal(me.company.plan, 'trial'); assert.deepEqual(me.settings.disciplines, ['Fire', 'Comms']); assert.equal(me.branches.length, 1); assert.equal(me.branches[0].code, 'AKL');
   await enter(ann, me.branches[0].id);
   assert.equal((await call(ann, '/api/projects')).body.length, 0);                      // sees nothing of PSG
   assert.equal((await call(ann, '/api/projects/1')).status, 404);                      // PSG job hidden, not forbidden
-  assert.equal((await call(null, '/api/signup', 'POST', { company_name: 'Dup', name: 'X Y', email: 'ann@testco.example', password: 'long-enough-pw' })).status, 409);
+  const inv2 = (await call(admin, '/api/platform/invites', 'POST', { note: 'Dup' })).body;
+  assert.equal((await call(null, '/api/signup', 'POST', { company_name: 'Dup', name: 'X Y', email: 'ann@testco.example', password: 'long-enough-pw', code: inv2.code })).status, 409);
   const co = (await call(ann, '/api/company')).body; assert.equal(co.setup.projects, 0); assert.equal(co.setup.users, 1);
   assert.equal((await call(ann, '/api/company', 'PATCH', { disciplines: 'Fire, Comms, Security' })).status, 200);
   assert.equal((await call(ann, '/api/meta/variations')).body.disciplines.length, 3);

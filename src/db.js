@@ -157,6 +157,10 @@ function migrate(d) {
   ensureColumn(d, 'companies', 'trial_ends_at', 'TEXT');
   ensureColumn(d, 'companies', 'signup_source', 'TEXT');
   ensureColumn(d, 'branches', 'timezone', 'TEXT');
+  d.exec(`CREATE TABLE IF NOT EXISTS signup_invites (
+    id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, note TEXT, trial_days INTEGER NOT NULL DEFAULT 30, plan TEXT NOT NULL DEFAULT 'trial',
+    max_uses INTEGER NOT NULL DEFAULT 1, uses INTEGER NOT NULL DEFAULT 0, expires_at TEXT, created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')), used_by_company_id INTEGER)`);
 }
 
 function ensureColumn(d, table, col, def) {
